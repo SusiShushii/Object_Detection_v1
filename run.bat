@@ -6,7 +6,7 @@ rem ===========================================================================
 rem  run.bat - run main.py with the .venv Python
 rem    run.bat skybug_spike skybug_tail     (priority = order of names)
 rem    run.bat carrot --dry                 (no real clicks, log only)
-rem  Stop: hold ESC or press Ctrl+C
+rem  Stop: hold F12 or press Ctrl+C
 rem ===========================================================================
 
 if not exist ".venv\Scripts\python.exe" (

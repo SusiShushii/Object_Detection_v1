@@ -2,25 +2,32 @@
 main.py - จุดเริ่มต้นโปรแกรม (รันไปเรื่อยๆ ไม่มี timeout)
 
 ขั้นตอนแต่ละรอบ:
-    1. รอหน้า Mission Result -> เจอไอเท็มตอนสีเทา
-    2. hover รอ -> ไอเท็มขึ้นสีปกติ -> คลิก
+    1. รอหน้า Mission Result -> เจอไอเท็ม
+    2. hover รอ -> ไอเท็มพร้อมกด -> คลิก (เก็บทีละช่องตามลำดับความสำคัญ)
     3. รอหน้า Mission Result ปิด แล้วเริ่มรอบใหม่
 
-หยุด: กด ESC ค้าง หรือ Ctrl+C
+ถ้าเกิด error กลางทาง (เช่น จับภาพจอไม่ได้ชั่วคราว) -> บันทึกลง detection.log แล้วทำงานต่อเอง
+
+หยุด: กด F12 ค้าง หรือ Ctrl+C
     python main.py                       -> คลิกทุกไอเท็มใน TARGETS
-    python main.py skybug_spike          -> คลิกเฉพาะที่ระบุ (ใส่ได้หลายชื่อ)
+    python main.py skybug_spike          -> คลิกเฉพาะที่ระบุ (ใส่ได้หลายชื่อ ชื่อแรกสำคัญสุด)
     python main.py skybug_spike --dry    -> ไม่คลิก แค่ log
 """
 
 import sys
+import time
+import traceback
 
-from click import ClickAborted, wait_and_click, wait_gone
+from click import STOP_KEY_NAME, ClickAborted, wait_and_click, wait_gone
 from object_detection import item_name, list_templates, log
 from screen import Screen
 
 # ไอเท็มที่ต้องการคลิก: None = ทุกไฟล์ในโฟลเดอร์ templates/
 # หรือระบุเอง เช่น ["carrot", "skybug_spike"]
 TARGETS = None
+
+# เกิด error แล้วรอกี่วินาทีก่อนทำงานต่อ
+ERROR_RETRY_DELAY = 2.0
 
 
 def main():
@@ -34,21 +41,37 @@ def main():
         return
 
     screen = Screen()
-    rounds, total_clicked = 0, 0
+    rounds, total_clicked, errors = 0, 0, 0
 
     log.info("#" * 60)
-    log.info(f"[main] เริ่มทำงาน  targets={targets or 'ทั้งหมด'}  dry_run={dry_run}")
-    log.info("[main] กด ESC ค้าง หรือ Ctrl+C เพื่อหยุด")
+    log.info(f"[main] เริ่มทำงาน  targets={targets or 'ทั้งหมด'}  dry_run={dry_run}  "
+             f"จอ={screen.get_screen_rect()[2]}x{screen.get_screen_rect()[3]}")
+    log.info(f"[main] กด {STOP_KEY_NAME} ค้าง หรือ Ctrl+C เพื่อหยุด")
 
-    try:
-        while True:
+    while True:
+        try:
             clicked = wait_and_click(screen, targets, timeout=None, dry_run=dry_run)
             rounds += 1
             total_clicked += clicked
             log.info(f"[main] จบรอบที่ {rounds}  คลิก {clicked}  (รวมทั้งหมด {total_clicked})")
             wait_gone(screen, targets)
-    except (ClickAborted, KeyboardInterrupt):
-        log.info(f"[main] หยุดทำงาน  {rounds} รอบ  คลิกรวม {total_clicked}")
+        except ClickAborted as e:
+            log.info(f"[main] หยุดทำงาน ({e})  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
+            break
+        except KeyboardInterrupt:
+            log.info(f"[main] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
+            break
+        except Exception:
+            # error กลางทาง -> บันทึกรายละเอียด แล้วเริ่มใหม่ (ไม่ปิดโปรแกรม)
+            errors += 1
+            log.info(f"[main] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {ERROR_RETRY_DELAY:.0f} วินาที\n"
+                     + traceback.format_exc())
+            try:
+                time.sleep(ERROR_RETRY_DELAY)
+                screen = Screen()       # สร้างตัวจับภาพจอใหม่ (เผื่อ error มาจากจอ)
+            except KeyboardInterrupt:
+                log.info(f"[main] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
+                break
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """
 click.py - คลิกเมาส์ตามตำแหน่งที่ detect เจอ (Windows API ผ่าน ctypes)
 
-ระหว่างคลิก กด ESC ค้างไว้เพื่อหยุดได้ทันที
+ระหว่างทำงาน กด F12 ค้างไว้เพื่อหยุดได้ทันที (STOP_KEY)
 """
 
 import ctypes
@@ -144,7 +144,10 @@ MOUSE_FLAGS = {
     "left": (0x0002, 0x0004),    # LEFTDOWN, LEFTUP
     "right": (0x0008, 0x0010),   # RIGHTDOWN, RIGHTUP
 }
-VK_ESCAPE = 0x1B
+# ปุ่มหยุดโปรแกรม (กดค้าง): F12  (ไม่ใช้ ESC เพราะในเกมกด ESC บ่อย -> โปรแกรมหยุดเอง)
+# เปลี่ยนได้ เช่น 0x23 = End, 0x13 = Pause  (ดูรหัสปุ่มได้จาก Virtual-Key Codes ของ Windows)
+STOP_KEY = 0x7B
+STOP_KEY_NAME = "F12"
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -177,11 +180,11 @@ def _send_mouse(flag):
 # ---------------------------------------------------------------------------
 
 class ClickAborted(Exception):
-    """ผู้ใช้กด ESC เพื่อหยุดคลิก"""
+    """ผู้ใช้กดปุ่มหยุด (STOP_KEY) ค้าง"""
 
 
 def esc_pressed():
-    return bool(user32.GetAsyncKeyState(VK_ESCAPE) & 0x8000)
+    return bool(user32.GetAsyncKeyState(STOP_KEY) & 0x8000)
 
 
 def click(x, y, button="left", hold=0.05, move_delay=0.05):
@@ -191,7 +194,7 @@ def click(x, y, button="left", hold=0.05, move_delay=0.05):
     move_delay : รอหลังเลื่อนเมาส์ ให้เกมรับรู้ว่าเมาส์มาอยู่ตรงนี้แล้ว
     """
     if esc_pressed():
-        raise ClickAborted("กด ESC -> หยุดคลิก")
+        raise ClickAborted(f"กด {STOP_KEY_NAME} -> หยุดคลิก")
 
     down, up = MOUSE_FLAGS[button]
     move_to(x, y)
@@ -405,11 +408,11 @@ def _save_debug(img, tag):
 
 
 def _sleep(seconds):
-    """sleep ที่เช็ก ESC ระหว่างรอ"""
+    """sleep ที่เช็กปุ่มหยุด (STOP_KEY) ระหว่างรอ"""
     end = time.perf_counter() + seconds
     while True:
         if esc_pressed():
-            raise ClickAborted("กด ESC -> หยุด")
+            raise ClickAborted(f"กด {STOP_KEY_NAME} -> หยุด")
         left = end - time.perf_counter()
         if left <= 0:
             return
@@ -654,7 +657,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                       ทุก check_interval เช็กว่าหน้าจอยังเปิดอยู่ไหม ถ้าปิดแล้ว -> เลิกรอ
 
     หยุดเมื่อคลิกครบทุกตัว หรือหมดเวลา timeout
-    กด ESC ค้าง -> raise ClickAborted
+    กด F12 ค้าง -> raise ClickAborted
     คืนจำนวนที่คลิกไปแล้ว
     """
     global _round_sig
@@ -695,8 +698,9 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     sig = _round_sig = _screen_sig(img)
     random_loot, loot_score = _is_random_loot(img, scale)
     log.info("=" * 60)
-    log.info(f"[wait_and_click] ลำดับ: {' > '.join(priority)}  region={region_box}  min_sat={min_sat}  "
-             f"dry_run={dry_run}")
+    sw, sh = screen.get_screen_rect()[2:]
+    log.info(f"[wait_and_click] ลำดับ: {' > '.join(priority)}  จอ={sw}x{sh}  scale={scale:.3f} "
+             f"(template x{scale:.2f})  region={region_box}  min_sat={min_sat}  dry_run={dry_run}")
     normal = ("ปกติ -> กดทันทีที่เจอ เก็บได้แล้วไปช่องถัดไป" if CLICK_ON_FOUND
               else "ปกติ -> กดตอนพร้อม เก็บได้แล้วไปช่องถัดไป")
     log.info(f"  โหมด: {'random loot -> กดทันทีที่เจอ ไม่รอขึ้นสี' if random_loot else normal}"
@@ -862,7 +866,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
 
     while pending or searching or verify:
         if esc_pressed():
-            raise ClickAborted("กด ESC -> หยุด")
+            raise ClickAborted(f"กด {STOP_KEY_NAME} -> หยุด")
         if timed_out():
             log.info(f"  หมดเวลา {timeout}s (ยังรออยู่ {len(pending)} ตัว)")
             break
@@ -1015,7 +1019,7 @@ def wait_gone(screen, names=None, region="mission_reward", interval=0.3, confirm
     """รอจนหน้า Mission Result ปิด (ขอบกรอบไม่ตรงกับตอนเจอ ติดกัน confirm ครั้ง)
     ใช้หลังคลิกเสร็จ กันไม่ให้รอบถัดไปคลิกไอเท็มเดิมซ้ำ
     เมาส์ค้างอยู่บนไอเท็ม / tooltip ขึ้น ก็ไม่ทำให้เข้าใจผิดว่าหน้าจอปิด
-    กด ESC ค้าง -> raise ClickAborted"""
+    กด F12 ค้าง -> raise ClickAborted"""
     region_box = screen.get_region(region)
     if _round_sig is None:
         return
@@ -1048,7 +1052,7 @@ if __name__ == "__main__":
     names = [a for a in sys.argv[1:] if not a.startswith("--")] or None
 
     for n in range(3, 0, -1):
-        print(f"เริ่มใน {n}... (สลับไปหน้าเกม / กด ESC ค้างเพื่อหยุด)")
+        print(f"เริ่มใน {n}... (สลับไปหน้าเกม / กด {STOP_KEY_NAME} ค้างเพื่อหยุด)")
         time.sleep(1)
 
     try:
