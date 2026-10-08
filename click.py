@@ -59,6 +59,10 @@ CLICK_ON_FOUND = False
 # วัดจริง: หน้า Mission Result >= 0.90  ฉากเกม <= 0.38
 HEADER_MARKER = os.path.join(BASE_DIR, "markers", "mission_reward.png")
 HEADER_MATCH = 0.65
+# หัวข้อ "Mission Reward" ต้องเห็นอยู่เสมอ ถึงจะหาไอเท็ม / ขยับเมาส์ / คลิก
+# (กันคลิกมั่วเมื่อไม่ได้อยู่หน้า Mission Result เช่น ฉากเกมที่มีแครอทบนพื้นจับผิด หรือหน้าจอปิดไปแล้ว)
+# หายติดกันกี่เฟรม = ถือว่าออกจากหน้านั้นแล้ว -> เลิกรอ ไม่คลิกต่อ
+HEADER_LOST_FRAMES = 3
 SAVE_LOOT = True
 LOOT_DIR = os.path.join(BASE_DIR, "loot")
 LOOT_SETTLE = 0.3          # เห็นหัวข้อแล้วรออย่างน้อยเท่านี้ก่อนบันทึก (วินาที)
@@ -81,7 +85,7 @@ MOVE_DELAY = 0.016
 # ขยับเมาส์แบบคน (ไม่วาป): เส้นโค้งนิดๆ เร็วตอนต้น ช้าลงตอนใกล้ถึง
 # False = วาปไปทันที
 SMOOTH_MOVE = True
-MOVE_TIME = (0.05, 0.18)       # เวลาที่ใช้ขยับ (วินาที): (ระยะใกล้, ระยะไกล)
+MOVE_TIME = (0.04, 0.12)       # เวลาที่ใช้ขยับ (วินาที): (ระยะใกล้, ระยะไกล)
 MOVE_CURVE = 0.18              # เส้นทางโค้งออกจากเส้นตรงได้สูงสุดกี่ % ของระยะ (สุ่มทุกครั้ง)
 MOVE_OVERSHOOT = 0.3           # โอกาสเลยเป้าแล้วแก้กลับ (เฉพาะระยะ > 250px)
 
@@ -92,9 +96,14 @@ MOVE_OVERSHOOT = 0.3           # โอกาสเลยเป้าแล้�
 #   ถ้าไอเท็มพร้อมกดระหว่างทาง -> เร่งไปให้ถึงทันที (ไม่พลาดจังหวะ)
 # ช่องที่พร้อมกดแล้ว (รีบ) ยังใช้ MOVE_TIME แบบเร็วเหมือนเดิม
 HUMAN_HOVER = True
-FITTS_A = (0.10, 0.20)         # วินาที
-FITTS_B = (0.10, 0.15)         # วินาทีต่อ bit
-REACTION_TIME = (0.18, 0.32)   # วินาที
+FITTS_A = (0.03, 0.07)         # วินาที
+FITTS_B = (0.05, 0.08)         # วินาทีต่อ bit
+REACTION_TIME = (0.08, 0.16)   # วินาที
+
+# ระหว่างเลื่อนเมาส์ จับภาพเช็กสถานะทุกกี่ก้าว (จับทุกก้าวบน RDP ทำให้เมาส์ช้า/กระตุก)
+STEP_CHECK_EVERY = 3
+# เวลากดค้างตอนคลิก (วินาที) สุ่ม
+CLICK_HOLD = (0.03, 0.06)
 MOVE_TIME_FULL_DIST = 1500     # ระยะ (px) ที่ใช้เวลาเต็ม MOVE_TIME[1]
 
 # บันทึกภาพ debug (ตอนเจอ / หาไม่เจอ / คลิก) ไว้ที่โฟลเดอร์ debug/
@@ -682,6 +691,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
 
     # ---- ช่วงที่ 1: ค้นหา (ยังไม่ log จนกว่าจะเจอ จะได้ไม่รก log ตอนรอนานๆ) ----
     targets = []
+    detect_ms = 0.0
     while not targets:
         if timed_out():
             log.info(f"[wait_and_click] หมดเวลา {timeout}s (ไม่เจอ {names})")
@@ -689,7 +699,10 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
         t0 = time.perf_counter()
         img = screen.grab(region_box)
         _loot_log(img, scale)
-        targets = _detect_all(img, names, scale)
+        # หาไอเท็มเฉพาะตอนที่เห็นหัวข้อ "Mission Reward" (= อยู่หน้า Mission Result จริง)
+        # ไม่งั้นแครอทในฉากเกมอาจถูกจับเป็นไอเท็ม แล้วเมาส์ไปคลิกกลางฉาก
+        if _header_score(img, scale) >= HEADER_MATCH:
+            targets = _detect_all(img, names, scale)
         detect_ms = (time.perf_counter() - t0) * 1000
         if not targets:
             _sleep(search_interval)
@@ -740,6 +753,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     state = {t: "first" for t in pending}
     clicks = {t: 0 for t in pending}
     absent_since = {}
+    header_miss = 0         # หัวข้อ Mission Reward หายติดกันกี่เฟรม
     last_click = {}
     shown_get = {}
     shown_bg = {}
@@ -772,9 +786,22 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                         or _get_score(frame, target, scale) >= GET_MATCH)
 
             # ระหว่างขยับเมาส์ ยังจับภาพเช็ก: ภาพ loot / ช่องที่รอยืนยัน / (โหมดคน) ไอเท็มพร้อมกดหรือยัง
+            n_step = [0]
+            lost = [0]          # หัวข้อ Mission Reward หายติดกันกี่เฟรมระหว่างขยับ
+
             def step(check_ready=False):
+                n_step[0] += 1
+                if n_step[0] % STEP_CHECK_EVERY:        # จับภาพแค่ทุก STEP_CHECK_EVERY ก้าว
+                    _spin(random.uniform(0.003, 0.005))
+                    return False
                 frame = screen.grab(region_box)
                 _loot_log(frame, scale)        # ภาพ loot ตอนสีปกติ อาจเกิดระหว่างขยับเมาส์
+                if _header_score(frame, scale) < HEADER_MATCH:
+                    lost[0] += 1
+                    if lost[0] >= HEADER_LOST_FRAMES:
+                        return True            # ออกจากหน้า Mission Result แล้ว -> หยุดขยับทันที
+                else:
+                    lost[0] = 0
                 if verify:
                     check_verify(frame)
                 return check_ready and slot_ready(frame)
@@ -793,8 +820,12 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                         break
                     _spin(0.005)
                 if became_ready or move_to(hx, hy, on_step=lambda: step(True), relaxed=True, width=target[1][2]):
-                    mode = "แบบคน -> ไอเท็มพร้อมกดระหว่างทาง เร่งให้ถึง"
-                    move_to(hx, hy, on_step=step)
+                    if lost[0] < HEADER_LOST_FRAMES:
+                        mode = "แบบคน -> ไอเท็มพร้อมกดระหว่างทาง เร่งให้ถึง"
+                        move_to(hx, hy, on_step=step)
+            if lost[0] >= HEADER_LOST_FRAMES:
+                log.info(f"  {elapsed_ms():7.0f}ms  หัวข้อ Mission Reward หายระหว่างขยับเมาส์ -> หยุดขยับ ไม่คลิก")
+                return
         hovering = target
         log.info(f"  {elapsed_ms():7.0f}ms  hover รอที่ {item_name(target[0])} x={target[1][0]} y={target[1][1]} "
                  f"screen=({hx}, {hy})  ขยับ{mode} {(time.perf_counter() - t0) * 1000:.0f}ms")
@@ -871,12 +902,24 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             log.info(f"  หมดเวลา {timeout}s (ยังรออยู่ {len(pending)} ตัว)")
             break
 
-        if pending:
+        if pending and header_miss == 0:        # ไม่ขยับเมาส์ถ้าเฟรมล่าสุดไม่เห็นหน้า Mission Result
             hover_on(pending[0])
 
         t0 = time.perf_counter()
         img = screen.grab(region_box)
         _loot_log(img, scale)
+
+        # ต้องเห็นหัวข้อ "Mission Reward" ทุกเฟรม ไม่งั้นไม่คลิก / ไม่ขยับเมาส์
+        on_screen = _header_score(img, scale) >= HEADER_MATCH
+        header_miss = 0 if on_screen else header_miss + 1
+        if header_miss >= HEADER_LOST_FRAMES:
+            log.info(f"  {elapsed_ms():7.0f}ms  ไม่เห็นหัวข้อ Mission Reward ติดกัน {header_miss} เฟรม "
+                     f"-> ออกจากหน้า Mission Result แล้ว เลิกรอ ไม่คลิก  debug: {_save_debug(img, 'left')}")
+            break
+        if not on_screen:
+            time.sleep(watch_interval)
+            continue
+
         check_verify(img)
         loops += 1
         now = time.perf_counter()
@@ -963,9 +1006,9 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             if not SINGLE_CLICK and time.perf_counter() - last_any[0] < CLICK_GAP:
                 continue
 
-            # ก่อนกด: หน้าจอยังเปิดอยู่ไหม
+            # ก่อนกด: หน้าจอยังเปิดอยู่ไหม (เห็นหัวข้อในเฟรมนี้ + ขอบกรอบตรงกับตอนเจอ)
             is_open, _ = _screen_open(img, sig)
-            if not is_open:
+            if not on_screen or not is_open:
                 continue
 
             t_ready = elapsed_ms()
@@ -977,7 +1020,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 _send_mouse(down)
             t_down = elapsed_ms()
             if not dry_run:
-                time.sleep(hold)
+                time.sleep(random.uniform(*CLICK_HOLD))
                 _send_mouse(up)
             hovering = target
             clicks[target] += 1

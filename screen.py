@@ -11,6 +11,14 @@ from ctypes import wintypes
 
 import cv2
 import mss
+
+# ปิด CAPTUREBLT ของ mss: ทำให้เมาส์กระพริบทุกครั้งที่จับภาพจอ
+# (จำเป็นแค่จับหน้าต่างโปร่งใสแบบ layered ซึ่งไม่ได้ใช้)
+try:
+    import mss.windows.gdi as _mss_gdi
+    _mss_gdi.CAPTUREBLT = 0
+except Exception:
+    pass
 import numpy as np
 
 # ---------------------------------------------------------------------------
