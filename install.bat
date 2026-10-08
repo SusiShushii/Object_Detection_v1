@@ -79,7 +79,9 @@ if errorlevel 1 (
 
 echo.
 echo === Done ===
-echo Run:  run.bat skybug_spike skybug_tail
-echo       run.bat carrot --dry
+echo Open a Command Prompt with .venv ready:  venv_cmd.bat
+echo   then type:  python main.py water_dungeon   (profile in profiles\)
+echo               python main.py carrot --dry     (single item)
+echo Or run directly:  run.bat water_dungeon
 echo.
 pause

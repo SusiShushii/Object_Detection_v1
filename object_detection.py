@@ -50,9 +50,38 @@ if not log.handlers:
 # Template
 # ---------------------------------------------------------------------------
 
+# โฟลเดอร์รูปเพิ่มเติม (เช่น โฟลเดอร์โปรไฟล์ profiles/Water_Dungeon/) ค้นก่อน templates/
+# รูปชื่อเดียวกัน: ในโฟลเดอร์โปรไฟล์ใช้ก่อน
+_extra_dirs = []
+
+
+def use_template_dirs(dirs):
+    """ตั้งโฟลเดอร์รูปเพิ่มเติม (ลำดับแรกสุดมาก่อน) แล้วล้าง cache"""
+    _extra_dirs[:] = [d for d in dirs if d]
+    _cache.clear()
+    _gray_cache.clear()
+
+
+def template_dirs():
+    return _extra_dirs + [TEMPLATE_DIR]
+
+
+def find_template_path(name):
+    """path ของรูป name.png ค้นจากโฟลเดอร์โปรไฟล์ก่อน แล้วค่อย templates/"""
+    for d in template_dirs():
+        path = os.path.join(d, f"{name}.png")
+        if os.path.isfile(path):
+            return path
+    return os.path.join(TEMPLATE_DIR, f"{name}.png")
+
+
 def list_templates():
-    """ชื่อ template ทั้งหมดในโฟลเดอร์ templates/ (ไม่รวม .png) เช่น ["carrot", ...]"""
-    return sorted(f[:-4] for f in os.listdir(TEMPLATE_DIR) if f.lower().endswith(".png"))
+    """ชื่อ template ทั้งหมด (ไม่รวม .png) จากโฟลเดอร์โปรไฟล์ + templates/ เช่น ["carrot", ...]"""
+    names = set()
+    for d in template_dirs():
+        if os.path.isdir(d):
+            names.update(f[:-4] for f in os.listdir(d) if f.lower().endswith(".png"))
+    return sorted(names)
 
 
 def item_name(template):
@@ -88,7 +117,7 @@ def load_template(name, scale=1.0):
     if key in _cache:
         return _cache[key]
 
-    path = os.path.join(TEMPLATE_DIR, f"{name}.png")
+    path = find_template_path(name)
     tpl = cv2.imread(path, cv2.IMREAD_COLOR)
     if tpl is None:
         raise FileNotFoundError(f"ไม่พบ template: {path}")
@@ -121,7 +150,7 @@ def _gray_top(name, scale=1.0):
 def calibrate(img, name, scale=1.0, lo=0.5, hi=1.8, accept=0.85):
     """หาขนาดของรูป name ที่ตรงกับภาพ img ที่สุด (ลองย่อ/ขยายหลายขนาด)
     คืน (คะแนนสูงสุด, ตัวคูณขนาดเทียบกับขนาดมาตรฐาน)  ถ้าคะแนน < accept ถือว่าไม่มีรูปนี้ในภาพ"""
-    path = os.path.join(TEMPLATE_DIR, f"{name}.png")
+    path = find_template_path(name)
     raw = cv2.imread(path, cv2.IMREAD_COLOR)
     if raw is None:
         return -1.0, 1.0
