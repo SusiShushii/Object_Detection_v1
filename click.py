@@ -63,6 +63,12 @@ HEADER_MATCH = 0.65
 # (กันคลิกมั่วเมื่อไม่ได้อยู่หน้า Mission Result เช่น ฉากเกมที่มีแครอทบนพื้นจับผิด หรือหน้าจอปิดไปแล้ว)
 # หายติดกันกี่เฟรม = ถือว่าออกจากหน้านั้นแล้ว -> เลิกรอ ไม่คลิกต่อ
 HEADER_LOST_FRAMES = 3
+
+# ภาพ debug แบบวาดกรอบ + คะแนน (debug/*_boxes.png): วาดทุกจุดที่เทียบแล้วคล้ายตั้งแต่ BOX_MIN_SCORE ขึ้นไป
+# เขียว = ช่องที่เลือกเก็บ  เหลือง = เจอแต่รอคิว  แดง = คะแนนต่ำกว่าเกณฑ์ (ไม่นับว่าเจอ)
+# ถ้าอยู่หน้า Mission Result แล้ว NO_FOUND_DIAG วินาทีไม่เจอไอเท็มที่สั่งเก็บเลย -> บันทึกภาพ + log คะแนนสูงสุดให้เอง
+BOX_MIN_SCORE = 0.68      # ช่องว่างได้ ~0.6 กับรูปที่มีขอบช่องติดมา (เช่น carrot) จึงตั้งสูงกว่านั้นกันภาพรก
+NO_FOUND_DIAG = 1.5
 SAVE_LOOT = True
 LOOT_DIR = os.path.join(BASE_DIR, "loot")
 LOOT_SETTLE = 0.3          # เห็นหัวข้อแล้วรออย่างน้อยเท่านี้ก่อนบันทึก (วินาที)
@@ -404,6 +410,33 @@ def _detect_all(img, names, scale):
     return targets
 
 
+def _draw_boxes(img, names, scale, chosen=None, threshold=0.75):
+    """วาดกรอบ + คะแนนของทุกจุดที่ template คล้ายตั้งแต่ BOX_MIN_SCORE ขึ้นไป (รวมที่ต่ำกว่าเกณฑ์)
+    คืน (ภาพ, ข้อความสรุปคะแนนสูงสุดต่อ template)"""
+    out = img.copy() if img.ndim == 3 else cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    best = []
+    for name in names:
+        best.append(f"{name}={best_score(img, name, scale):.2f}")
+        for x, y, w, h, sc in detect(img, name, threshold=BOX_MIN_SCORE, scale=scale, quiet=True):
+            picked = chosen is not None and chosen[0] == name and abs(chosen[1][0] - x) < w // 2 \
+                and abs(chosen[1][1] - y) < h // 2
+            if picked:
+                color = (0, 220, 0)
+            elif sc >= threshold:
+                color = (0, 220, 255)
+            else:
+                color = (0, 0, 255)
+            cv2.rectangle(out, (x, y), (x + w, y + h), color, 2 if picked else 1)
+            label = f"{name} {sc:.2f}"
+            ty = y - 4 if y > 14 else y + h + 12
+            cv2.putText(out, label, (x, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 3)
+            cv2.putText(out, label, (x, ty), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+    pad = np.full((24, out.shape[1], 3), 30, np.uint8)
+    cv2.putText(pad, f"green=picked yellow=queue red=below {threshold} | min shown {BOX_MIN_SCORE}",
+                (4, 16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
+    return np.vstack([out, pad]), "  ".join(best)
+
+
 def _save_debug(img, tag):
     """บันทึกภาพ region ไว้ดูทีหลัง เช่น debug/20261005_145812_123_found.png
     เขียนไฟล์ใน thread แยก ไม่ให้ถ่วงจังหวะกด"""
@@ -692,6 +725,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     # ---- ช่วงที่ 1: ค้นหา (ยังไม่ log จนกว่าจะเจอ จะได้ไม่รก log ตอนรอนานๆ) ----
     targets = []
     detect_ms = 0.0
+    diag_stamp = [""]
     while not targets:
         if timed_out():
             log.info(f"[wait_and_click] หมดเวลา {timeout}s (ไม่เจอ {names})")
@@ -703,6 +737,13 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
         # ไม่งั้นแครอทในฉากเกมอาจถูกจับเป็นไอเท็ม แล้วเมาส์ไปคลิกกลางฉาก
         if _header_score(img, scale) >= HEADER_MATCH:
             targets = _detect_all(img, names, scale)
+            st_ = _loot_state
+            if (not targets and st_["visible"] and time.perf_counter() - st_["since"] >= NO_FOUND_DIAG
+                    and diag_stamp[0] != st_["stamp"]):
+                diag_stamp[0] = st_["stamp"]
+                boxed, best = _draw_boxes(img, names, scale)
+                log.info(f"[detect] อยู่หน้า Mission Result แต่ไม่เจอไอเท็มที่สั่งเก็บ (เกณฑ์ 0.75)  "
+                         f"คะแนนสูงสุด: {best}  debug: {_save_debug(boxed, 'notfound_boxes')}")
         detect_ms = (time.perf_counter() - t0) * 1000
         if not targets:
             _sleep(search_interval)
@@ -741,7 +782,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                  f"sat={saturation(img, item, masks[name]):5.1f} pref={pref(item):5.1f}{note}")
     targets = [first]
     if targets:
-        log.info(f"             debug: {_save_debug(img, 'found')}")
+        boxed, best = _draw_boxes(img, names, scale, chosen=first)
+        log.info(f"             debug: {_save_debug(img, 'found')}  กรอบ+คะแนน: {_save_debug(boxed, 'found_boxes')}")
 
     # ---- ช่วงที่ 2: เก็บทีละช่อง เก็บได้แล้วย้ายไปช่องถัดไป ------------------------
     # สถานะของช่องที่กำลังเก็บ
