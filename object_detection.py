@@ -147,6 +147,21 @@ def _gray_top(name, scale=1.0):
     return _gray_cache[key]
 
 
+# เทียบแบบสี 3 ช่อง (BGR) แทนขาวดำ: ทนต่อสถานะทึบ/ปกติ และแยกไอเท็มรูปทรงคล้ายแต่คนละสีได้ดีกว่ามาก
+# วัดจริง (ภาพ loot 89 ภาพ 2 เครื่อง): ไอเท็มจริงบนภาพทึบ ขาวดำ 0.73 -> สี 0.87
+# ไอเท็มหน้าคล้ายคนละสี ขาวดำสูงสุด 0.92 -> สี 0.50  ช่องว่างของแครอท 0.66 -> 0.58  (เวลา 1.8ms -> 5.6ms ต่อรูป)
+COLOUR_MATCH = True
+
+
+def _color_top(name, scale=1.0):
+    """template สี (BGR) ส่วนบน เหนือตัวเลขมุมขวาล่าง"""
+    key = (name, round(scale * _adjust.get(name, 1.0), 3), "c")
+    if key not in _gray_cache:
+        tpl, _ = load_template(name, scale)
+        _gray_cache[key] = tpl[:int(tpl.shape[0] * BADGE_START[1])].copy()
+    return _gray_cache[key]
+
+
 def calibrate(img, name, scale=1.0, lo=0.5, hi=1.8, accept=0.85):
     """หาขนาดของรูป name ที่ตรงกับภาพ img ที่สุด (ลองย่อ/ขยายหลายขนาด)
     คืน (คะแนนสูงสุด, ตัวคูณขนาดเทียบกับขนาดมาตรฐาน)  ถ้าคะแนน < accept ถือว่าไม่มีรูปนี้ในภาพ"""
@@ -154,15 +169,18 @@ def calibrate(img, name, scale=1.0, lo=0.5, hi=1.8, accept=0.85):
     raw = cv2.imread(path, cv2.IMREAD_COLOR)
     if raw is None:
         return -1.0, 1.0
-    gray = to_gray(img)
+    use_colour = COLOUR_MATCH and img.ndim == 3
+    target = img if use_colour else to_gray(img)
 
     def score_at(f):
         s = scale * f
         t = cv2.resize(raw, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if abs(s - 1) > 1e-3 else raw
-        t = cv2.cvtColor(t[:int(t.shape[0] * BADGE_START[1])], cv2.COLOR_BGR2GRAY)
-        if gray.shape[0] < t.shape[0] or gray.shape[1] < t.shape[1] or min(t.shape) < 12:
+        t = t[:int(t.shape[0] * BADGE_START[1])]
+        if not use_colour:
+            t = cv2.cvtColor(t, cv2.COLOR_BGR2GRAY)
+        if target.shape[0] < t.shape[0] or target.shape[1] < t.shape[1] or min(t.shape[:2]) < 12:
             return -1.0
-        v = float(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED).max())
+        v = float(cv2.matchTemplate(target, t, cv2.TM_CCOEFF_NORMED).max())
         return -1.0 if np.isnan(v) else v
 
     best_s, best_f = -1.0, 1.0
@@ -230,11 +248,13 @@ def match_map(img, name, scale=1.0):
     ตัดแถวล่างที่กรอบไอเท็มเต็มขนาดจะล้นภาพออก -> ตำแหน่งที่ได้ใช้กับกรอบเต็มได้เสมอ
     คืน None ถ้าภาพเล็กกว่า template"""
     th, tw = load_template(name, scale)[0].shape[:2]
-    gray = to_gray(img)
-    if gray.shape[0] < th or gray.shape[1] < tw:
+    if img.shape[0] < th or img.shape[1] < tw:
         return None
-    result = cv2.matchTemplate(gray, _gray_top(name, scale), cv2.TM_CCOEFF_NORMED)
-    result = result[:gray.shape[0] - th + 1]
+    if COLOUR_MATCH and img.ndim == 3:
+        result = cv2.matchTemplate(img, _color_top(name, scale), cv2.TM_CCOEFF_NORMED)
+    else:
+        result = cv2.matchTemplate(to_gray(img), _gray_top(name, scale), cv2.TM_CCOEFF_NORMED)
+    result = result[:img.shape[0] - th + 1]
     return np.nan_to_num(result, nan=-1, posinf=-1, neginf=-1)
 
 
