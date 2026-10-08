@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 
 import click
-from object_detection import BADGE_START, TEMPLATE_DIR, best_score, list_templates
+from object_detection import BADGE_START, TEMPLATE_DIR, best_score, list_templates, same_colour
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CROP_DIR = os.path.join(BASE_DIR, "crops")
@@ -57,36 +57,6 @@ def _match(a, b):
     b = cv2.copyMakeBorder(b, 6, 6, 6, 6, cv2.BORDER_REPLICATE)
     v = float(cv2.matchTemplate(b, a, cv2.TM_CCOEFF_NORMED).max())
     return -1.0 if np.isnan(v) else v
-
-
-def colour_vec(bgr):
-    """ทิศทางสีของไอคอนเทียบกับสีพื้นหลังช่อง (ไม่ขึ้นกับความสว่าง ใช้แยกไอเท็มรูปทรงคล้ายแต่คนละสี)
-    คืน (เวกเตอร์สี, ความเข้ม) หรือ None ถ้าไอคอนเกือบไม่มีสี (เทา/ขาว) เทียบสีไม่ได้"""
-    x = bgr.astype(np.float32) + 1.0
-    chroma = x[..., ::-1] / x.sum(axis=2, keepdims=True)           # (r,g,b) / ผลรวม -> ตัดความสว่างทิ้ง
-    h, w = x.shape[:2]
-    corners = [chroma[4:10, 4:10], chroma[4:10, w - 10:w - 4], chroma[int(h * .46):int(h * .55), 2:7],
-               chroma[int(h * .46):int(h * .55), w - 7:w - 2]]
-    bg = np.median(np.concatenate([c.reshape(-1, 3) for c in corners]), axis=0)
-    diff = chroma - bg
-    dist = np.linalg.norm(diff, axis=2)
-    mask = dist > 0.05
-    mask[int(h * BADGE_START[1]):, int(w * BADGE_START[0]):] = False        # ไม่นับตัวเลขจำนวน
-    mask[:3] = mask[-3:] = False
-    if mask.sum() < 40:
-        return None
-    v = diff[mask].mean(axis=0)
-    n = float(np.linalg.norm(v))
-    return (v / n, n) if n > 0.02 else None
-
-
-def same_colour(a_bgr, b_bgr, min_cos=0.3):
-    """False ถ้าสีของไอคอนคนละทิศทางกัน (เช่น หินสีส้ม vs หินสีเขียว)  ถ้าเทียบสีไม่ได้ถือว่าไม่ขัดแย้ง
-    วัดจริง: ไอเท็มเดียวกันตอนทึบ vs ปกติ cos +0.73  ไอเท็มต่างกัน cos -0.85 ถึง -1.0"""
-    a, b = colour_vec(a_bgr), colour_vec(b_bgr)
-    if a is None or b is None:
-        return True
-    return float(np.dot(a[0], b[0])) >= min_cos
 
 
 def similarity(a_bgr, b_bgr):

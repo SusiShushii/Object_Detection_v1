@@ -179,6 +179,48 @@ def calibrate(img, name, scale=1.0, lo=0.5, hi=1.8, accept=0.85):
     return best_s, round(best_f, 3)
 
 
+# ตรวจสีหลังเทียบรูปทรง: ไอเท็มรูปทรงเหมือนกันแต่คนละสี (เช่น แครอทม่วง vs แครอทส้ม) เทียบขาวดำแล้วคะแนนสูง
+# วัดจริง: แครอทม่วงได้ 0.78 กับรูปแครอทส้ม (เกณฑ์ 0.75) -> ต้องดูสีด้วย
+COLOUR_CHECK = True
+COLOUR_MIN_COS = 0.3       # ไอเท็มเดียวกันตอนทึบ vs ปกติ cos +0.73  ไอเท็มต่างสี cos -0.85 ถึง -1.0
+
+
+def colour_vec(bgr):
+    """ทิศทางสีของไอคอนเทียบกับสีพื้นหลังช่อง (ไม่ขึ้นกับความสว่าง)
+    คืน (เวกเตอร์สี, ความเข้ม) หรือ None ถ้าไอคอนเกือบไม่มีสี (เทา/ขาว) เทียบสีไม่ได้"""
+    x = bgr.astype(np.float32) + 1.0
+    chroma = x[..., ::-1] / x.sum(axis=2, keepdims=True)           # (r,g,b) / ผลรวม -> ตัดความสว่างทิ้ง
+    h, w = x.shape[:2]
+    if h < 20 or w < 20:
+        return None
+    corners = [chroma[4:10, 4:10], chroma[4:10, w - 10:w - 4], chroma[int(h * .46):int(h * .55), 2:7],
+               chroma[int(h * .46):int(h * .55), w - 7:w - 2]]
+    bg = np.median(np.concatenate([c.reshape(-1, 3) for c in corners]), axis=0)
+    diff = chroma - bg
+    mask = np.linalg.norm(diff, axis=2) > 0.05
+    mask[int(h * BADGE_START[1]):, int(w * BADGE_START[0]):] = False        # ไม่นับตัวเลขจำนวน
+    mask[:3] = mask[-3:] = False
+    if mask.sum() < 40:
+        return None
+    v = diff[mask].mean(axis=0)
+    n = float(np.linalg.norm(v))
+    return (v / n, n) if n > 0.02 else None
+
+
+def colour_cos(a_bgr, b_bgr):
+    """cos ของทิศทางสี 2 ไอคอน (None = เทียบสีไม่ได้)"""
+    a, b = colour_vec(a_bgr), colour_vec(b_bgr)
+    if a is None or b is None:
+        return None
+    return float(np.dot(a[0], b[0]))
+
+
+def same_colour(a_bgr, b_bgr, min_cos=COLOUR_MIN_COS):
+    """False ถ้าสีของไอคอนคนละทิศทาง  เทียบสีไม่ได้ถือว่าไม่ขัดแย้ง"""
+    c = colour_cos(a_bgr, b_bgr)
+    return c is None or c >= min_cos
+
+
 def to_gray(img):
     return img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
@@ -255,10 +297,17 @@ def detect(img, name, threshold=0.75, scale=1.0, quiet=False):
     candidates = sorted(zip(result[ys, xs], xs, ys), reverse=True)
 
     # ตัดจุดซ้ำที่อยู่ใกล้กัน (ไอเท็มเดียวกันมักเจอหลายพิกเซลติดกัน)
-    found = []
+    found, rejected = [], []
     for score, x, y in candidates:
-        if all(abs(x - fx) > tw // 2 or abs(y - fy) > th // 2 for fx, fy, *_ in found):
-            found.append((int(x), int(y), tw, th, float(score)))
+        near = lambda lst: not all(abs(x - fx) > tw // 2 or abs(y - fy) > th // 2 for fx, fy, *_ in lst)
+        if near(found) or near(rejected):
+            continue
+        if COLOUR_CHECK and not same_colour(img[y:y + th, x:x + tw], tpl):
+            rejected.append((int(x), int(y), tw, th, float(score)))
+            _log(f"  ปฏิเสธ x={x} y={y} score={score:.3f}: รูปทรงเหมือน {name} แต่สีไม่ตรง "
+                 f"(cos={colour_cos(img[y:y + th, x:x + tw], tpl):.2f})")
+            continue
+        found.append((int(x), int(y), tw, th, float(score)))
 
     _log(f"  พิกเซลที่ผ่าน threshold : {len(candidates)}  -> รวมจุดซ้ำแล้วเหลือ {len(found)}")
     _log(f"  เจอ {name} {len(found)} ตำแหน่ง")

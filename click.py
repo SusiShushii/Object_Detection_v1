@@ -64,6 +64,8 @@ HEADER_MATCH = 0.65
 # (กันคลิกมั่วเมื่อไม่ได้อยู่หน้า Mission Result เช่น ฉากเกมที่มีแครอทบนพื้นจับผิด หรือหน้าจอปิดไปแล้ว)
 # หายติดกันกี่เฟรม = ถือว่าออกจากหน้านั้นแล้ว -> เลิกรอ ไม่คลิกต่อ
 HEADER_LOST_FRAMES = 3
+# เช็กหัวข้อห่างกันอย่างน้อยกี่วินาที (กินเวลา ~2ms ต่อครั้ง) ระหว่างรอ  ก่อนคลิกจะเช็กสดอีกครั้งเสมอ
+HEADER_CHECK_EVERY = 0.04
 
 # ภาพ debug แบบวาดกรอบ + คะแนน (debug/*_boxes.png): วาดทุกจุดที่เทียบแล้วคล้ายตั้งแต่ BOX_MIN_SCORE ขึ้นไป
 # เขียว = ช่องที่เลือกเก็บ  เหลือง = เจอแต่รอคิว  แดง = คะแนนต่ำกว่าเกณฑ์ (ไม่นับว่าเจอ)
@@ -809,6 +811,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     clicks = {t: 0 for t in pending}
     absent_since = {}
     header_miss = 0         # หัวข้อ Mission Reward หายติดกันกี่เฟรม
+    last_hdr, last_on = -1.0, True      # เวลาเช็กหัวข้อล่าสุด + ผล
+    shown_sat = {}
     last_click = {}
     shown_get = {}
     shown_bg = {}
@@ -965,8 +969,13 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
         _loot_log(img, scale)
 
         # ต้องเห็นหัวข้อ "Mission Reward" ทุกเฟรม ไม่งั้นไม่คลิก / ไม่ขยับเมาส์
-        on_screen = _header_score(img, scale) >= HEADER_MATCH
-        header_miss = 0 if on_screen else header_miss + 1
+        hdr_fresh = time.perf_counter() - last_hdr >= HEADER_CHECK_EVERY
+        if hdr_fresh:
+            on_screen = last_on = _header_score(img, scale) >= HEADER_MATCH
+            last_hdr = time.perf_counter()
+            header_miss = 0 if on_screen else header_miss + 1
+        else:
+            on_screen = last_on
         if header_miss >= HEADER_LOST_FRAMES:
             log.info(f"  {elapsed_ms():7.0f}ms  ไม่เห็นหัวข้อ Mission Reward ติดกัน {header_miss} เฟรม "
                      f"-> ออกจากหน้า Mission Result แล้ว เลิกรอ ไม่คลิก  debug: {_save_debug(img, 'left')}")
@@ -1015,6 +1024,10 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 shown_get[target] = showing_get
                 log.info(f"  {elapsed_ms():7.0f}ms  {name} {'ขึ้นป้าย GET!' if showing_get else 'ป้าย GET! หายไป'} "
                          f"(get={get_score:.3f})")
+            sat_ready = sat >= min_sat
+            if sat_ready != shown_sat.get(target):
+                shown_sat[target] = sat_ready
+                log.info(f"  {elapsed_ms():7.0f}ms  {name} ไอคอน{'สีปกติ' if sat_ready else 'ทึบ'} (sat={sat:5.1f})")
             if bg_ready != shown_bg.get(target):
                 shown_bg[target] = bg_ready
                 log.info(f"  {elapsed_ms():7.0f}ms  {name} พื้นหลังช่อง{'ปกติ' if bg_ready else 'ทึบ'} (bg={bg_v:5.1f})")
@@ -1061,6 +1074,11 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             if not SINGLE_CLICK and time.perf_counter() - last_any[0] < CLICK_GAP:
                 continue
 
+            # ก่อนกด: เช็กหัวข้อสดในเฟรมนี้เสมอ (ลูปรอเช็กห่างกัน HEADER_CHECK_EVERY)
+            if not hdr_fresh:
+                hdr_fresh = True
+                on_screen = last_on = _header_score(img, scale) >= HEADER_MATCH
+                last_hdr = time.perf_counter()
             # ก่อนกด: หน้าจอยังเปิดอยู่ไหม (เห็นหัวข้อในเฟรมนี้ + ขอบกรอบตรงกับตอนเจอ)
             is_open, _ = _screen_open(img, sig)
             if not on_screen or not is_open:
@@ -1081,7 +1099,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             clicks[target] += 1
             clicked += 1
             last_click[target] = last_any[0] = time.perf_counter()
-            log.info(f"  {t_ready:7.0f}ms  {name} {why} sat={sat:5.1f} bg={bg_v:5.1f} score={score:.3f} "
+            by = "+".join(n for n, v in (("GET", showing_get), ("bg", bg_ready), ("sat", sat_ready)) if v) or "-"
+            log.info(f"  {t_ready:7.0f}ms  {name} {why} [สัญญาณ: {by}] sat={sat:5.1f} bg={bg_v:5.1f} score={score:.3f} "
                      f"get={get_score:.3f} -> click #{clicks[target]} screen=({hx}, {hy})  "
                      f"(กดลง {t_down - t_ready:.0f}ms หลังพร้อมกด)" + ("  [dry_run]" if dry_run else "")
                      + f"  debug: {_save_debug(img, 'click_' + name)}")
