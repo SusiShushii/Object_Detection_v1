@@ -15,8 +15,9 @@ from ctypes import wintypes
 import cv2
 import numpy as np
 
-from object_detection import (BASE_DIR, READY_SATURATION, detect, get_scale, item_name,
-                              list_templates, load_template, log, saturation, to_gray, best_score)
+from object_detection import (BASE_DIR, READY_SATURATION, best_score, calibrate, detect, get_adjust,
+                              get_scale, item_name, list_templates, load_template, log, saturation,
+                              set_adjust, to_gray)
 
 # เจอไอเท็ม -> ขยับเมาส์ไป hover บนไอเท็มรอไว้ พอพร้อมกดได้ทันที
 # จุดวางเมาส์สุ่มใหม่ทุกช่อง ภายในโซนนี้ (สัดส่วนของกรอบไอเท็ม: (x ต่ำสุด, x สูงสุด), (y ต่ำสุด, y สูงสุด))
@@ -741,6 +742,17 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             if (not targets and st_["visible"] and time.perf_counter() - st_["since"] >= NO_FOUND_DIAG
                     and diag_stamp[0] != st_["stamp"]):
                 diag_stamp[0] = st_["stamp"]
+                # ลองปรับขนาดรูป: ถ้ารูปครอปมาจากจอคนละความละเอียด คะแนนจะต่ำทั้งที่ไอเท็มอยู่ในภาพ
+                adjusted = []
+                for nm in names:
+                    sc_, f_ = calibrate(img, nm, scale)
+                    if sc_ >= 0.85 and abs(f_ - get_adjust(nm)) >= 0.03:
+                        set_adjust(nm, f_)
+                        adjusted.append(f"{nm} x{f_:.2f} (score {sc_:.2f})")
+                if adjusted:
+                    log.info(f"[detect] ขนาดรูปใน templates/ ไม่ตรงกับบนจอ -> ปรับขนาดอัตโนมัติ: {', '.join(adjusted)}")
+                    diag_stamp[0] = ""          # ลองหาใหม่ด้วยขนาดที่ปรับแล้ว
+                    continue
                 boxed, best = _draw_boxes(img, names, scale)
                 log.info(f"[detect] อยู่หน้า Mission Result แต่ไม่เจอไอเท็มที่สั่งเก็บ (เกณฑ์ 0.75)  "
                          f"คะแนนสูงสุด: {best}  debug: {_save_debug(boxed, 'notfound_boxes')}")
@@ -748,6 +760,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
         if not targets:
             _sleep(search_interval)
 
+    masks = {name: load_template(name, scale)[1] for name in names}     # คำนวณใหม่ เผื่อมีการปรับขนาดรูป
     start = time.perf_counter()    # จับเวลาใหม่ตั้งแต่เจอ
     sig = _round_sig = _screen_sig(img)
     random_loot, loot_score = _is_random_loot(img, scale)

@@ -61,8 +61,29 @@ def item_name(template):
     return template.split("-")[0]
 
 
+# ตัวคูณขนาดเฉพาะรูป (ปรับให้เองโดย calibrate) เมื่อรูปใน templates/ ครอปมาจากจอคนละความละเอียด
+# เช่น ครอปจากจอ 1080 แต่โปรแกรมคิดว่าเป็นจอ 2K -> ต้องขยาย x1.33
+_adjust = {}
+
+
+def set_adjust(name, factor):
+    """ตั้งตัวคูณขนาดของรูป name (ล้าง cache ของรูปนั้น) factor=1.0 = ใช้ขนาดมาตรฐาน"""
+    if abs(factor - 1.0) < 0.03:
+        factor = 1.0
+    if _adjust.get(name, 1.0) == factor:
+        return
+    _adjust[name] = factor
+    _cache.clear()
+    _gray_cache.clear()
+
+
+def get_adjust(name):
+    return _adjust.get(name, 1.0)
+
+
 def load_template(name, scale=1.0):
-    """โหลด template + mask ที่ปิดตัวเลขมุมขวาล่าง แล้วย่อ/ขยายตาม scale"""
+    """โหลด template + mask ที่ปิดตัวเลขมุมขวาล่าง แล้วย่อ/ขยายตาม scale (และตัวคูณเฉพาะรูป)"""
+    scale = scale * _adjust.get(name, 1.0)
     key = (name, round(scale, 3))
     if key in _cache:
         return _cache[key]
@@ -89,12 +110,44 @@ _gray_cache = {}
 def _gray_top(name, scale=1.0):
     """template แบบเร็ว: ขาวดำ + ตัดเฉพาะส่วนบน (เหนือตัวเลขมุมขวาล่าง) -> ไม่ต้องใช้ mask
     เร็วกว่าแบบสี + mask ประมาณ 10 เท่า (~2ms ต่อ template)"""
-    key = (name, round(scale, 3))
+    key = (name, round(scale * _adjust.get(name, 1.0), 3))
     if key not in _gray_cache:
         tpl, _ = load_template(name, scale)
         top = tpl[:int(tpl.shape[0] * BADGE_START[1])]
         _gray_cache[key] = cv2.cvtColor(top, cv2.COLOR_BGR2GRAY)
     return _gray_cache[key]
+
+
+def calibrate(img, name, scale=1.0, lo=0.5, hi=1.8, accept=0.85):
+    """หาขนาดของรูป name ที่ตรงกับภาพ img ที่สุด (ลองย่อ/ขยายหลายขนาด)
+    คืน (คะแนนสูงสุด, ตัวคูณขนาดเทียบกับขนาดมาตรฐาน)  ถ้าคะแนน < accept ถือว่าไม่มีรูปนี้ในภาพ"""
+    path = os.path.join(TEMPLATE_DIR, f"{name}.png")
+    raw = cv2.imread(path, cv2.IMREAD_COLOR)
+    if raw is None:
+        return -1.0, 1.0
+    gray = to_gray(img)
+
+    def score_at(f):
+        s = scale * f
+        t = cv2.resize(raw, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if abs(s - 1) > 1e-3 else raw
+        t = cv2.cvtColor(t[:int(t.shape[0] * BADGE_START[1])], cv2.COLOR_BGR2GRAY)
+        if gray.shape[0] < t.shape[0] or gray.shape[1] < t.shape[1] or min(t.shape) < 12:
+            return -1.0
+        v = float(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED).max())
+        return -1.0 if np.isnan(v) else v
+
+    best_s, best_f = -1.0, 1.0
+    f = lo
+    while f <= hi:                                      # หยาบ: ทีละ 5%
+        sc = score_at(f)
+        if sc > best_s:
+            best_s, best_f = sc, f
+        f += 0.05
+    for df in (-0.04, -0.03, -0.02, -0.01, 0.01, 0.02, 0.03, 0.04):   # ละเอียด: ทีละ 1% รอบค่าที่ดีที่สุด
+        sc = score_at(best_f + df)
+        if sc > best_s:
+            best_s, best_f = sc, best_f + df
+    return best_s, round(best_f, 3)
 
 
 def to_gray(img):
