@@ -20,8 +20,9 @@ import sys
 import cv2
 import numpy as np
 
-from object_detection import (BADGE_START, calibrate, detect, get_adjust, item_name, list_templates,
-                              load_template, saturation, set_adjust)
+import object_detection as od
+from object_detection import (BADGE_START, calibrate, colour_cos, detect, get_adjust, item_name,
+                              list_templates, load_template, match_map, saturation, set_adjust)
 import click
 from profiles import list_profiles, resolve
 from screen import GAME_ASPECT, REGIONS
@@ -93,10 +94,10 @@ def test_image(path, names):
     for t in list_templates():
         templates_by_item.setdefault(item_name(t), []).append(t)
 
-    shown, picked_total = [], 0
+    shown, picked_total, all_rejected = [], 0, []
     for name in names:
         tpls = templates_by_item.get(name, [])
-        found = []
+        found, rejected = [], []
         for t in tpls:
             f = detect(region, t, scale=scale, quiet=True)
             if not f:                                           # ไม่เจอ -> ลองปรับขนาดรูป (เหมือนตอนรันจริง)
@@ -106,15 +107,43 @@ def test_image(path, names):
                     print(f"  [{name}] รูป {t}.png ขนาดไม่ตรงกับบนจอ -> ปรับอัตโนมัติ x{fac:.2f} (คะแนน {sc:.2f})")
                     f = detect(region, t, scale=scale, quiet=True)
             found += [(t, *it) for it in f]
+            # รูปทรงตรงแต่สีไม่ตรง (โปรแกรมจริงจะปฏิเสธ) -> แสดงให้เห็น ไม่งั้นดูเหมือนไม่เจออะไรเลย
+            od.COLOUR_CHECK = False
+            raw = detect(region, t, scale=scale, quiet=True)
+            od.COLOUR_CHECK = True
+            tpl_img = load_template(t, scale)[0]
+            for (x, y, w, h, s0) in raw:
+                if all(abs(x - fx) > w // 2 or abs(y - fy) > h // 2 for fx, fy, *_ in f):
+                    cs = colour_cos(region[y:y + h, x:x + w], tpl_img)
+                    rejected.append((t, x, y, w, h, s0, cs))
+        all_rejected.extend(rejected)
         # รวมผลหลายรูปของไอเท็มเดียวกัน (ช่องเดียวกัน เก็บคะแนนสูงสุด)
         merged = []
         for t, x, y, w, h, s in sorted(found, key=lambda z: -z[5]):
             if all(abs(x - m[1]) > w // 2 or abs(y - m[2]) > h // 2 for m in merged):
                 merged.append((t, x, y, w, h, s))
         print(f"\n[{name}]  รูปที่ใช้: {', '.join(tpls) or '(ไม่มีรูป)'}")
+        for t in tpls:
+            raw_h, raw_w = cv2.imread(od.find_template_path(t)).shape[:2]
+            now_h, now_w = load_template(t, scale)[0].shape[:2]
+            print(f"   {t}.png  ขนาดไฟล์ {raw_w}x{raw_h}  -> ใช้ {now_w}x{now_h} บนรูปนี้ "
+                  f"(ช่องบนรูปนี้ ~{int(62 * scale)}x{int(65 * scale)})"
+                  + (f"  [ปรับขนาดเอง x{get_adjust(t):.2f}]" if get_adjust(t) != 1.0 else ""))
+        for t, x, y, w, h, s0, cs in rejected:
+            c, r = slot_of(x, y, scale)
+            print(f"   ปฏิเสธเพราะสีไม่ตรง: คอลัมน์ {c} แถว {r}  รูปทรงเหมือน {t} (คะแนน {s0:.2f}) แต่สีคนละทิศทาง"
+                  f" (cos {cs:.2f} เกณฑ์ {od.COLOUR_MIN_COS})")
         if not merged:
-            best = max((click.best_score(region, t, scale * get_adjust(t)) for t in tpls), default=-1)
-            print(f"   -> ไม่เจอ  (คะแนนสูงสุด {best:.2f} ต่ำกว่าเกณฑ์ 0.75)")
+            best, bx, by = -1.0, 0, 0
+            for t in tpls:
+                m = match_map(region, t, scale)
+                if m is not None:
+                    _, mx, _, loc = cv2.minMaxLoc(m)
+                    if mx > best:
+                        best, bx, by = float(mx), loc[0], loc[1]
+            bc, br = slot_of(bx, by, scale)
+            where = f" ใกล้ที่สุดอยู่ที่คอลัมน์ {bc} แถว {br}" if best > 0 else ""
+            print(f"   -> ไม่เจอ  (คะแนนสูงสุด {best:.2f} ต่ำกว่าเกณฑ์ 0.75{where})")
             hint = ("   ไอเท็มนี้ไม่อยู่ในรูป หรือรูปใน templates/ ไม่ตรงกับในเกม"
                     if best < 0.68 else "   เกือบเจอ: รูป template ครอปไม่พอดี/มีเมาส์/พื้นหลังต่างกัน ลองครอปใหม่จากรูปใน loot/")
             print(hint)
@@ -135,6 +164,10 @@ def test_image(path, names):
 
     all_tpls = [t for n in names for t in templates_by_item.get(n, [])]
     boxed, summary = click._draw_boxes(region, all_tpls, scale, chosen=None)
+    for t, x, y, w, h, s0, cs in all_rejected:                       # สีม่วง = รูปทรงตรงแต่สีไม่ตรง
+        cv2.rectangle(boxed, (x, y), (x + w, y + h), (255, 0, 255), 2)
+        cv2.putText(boxed, f"{t} {s0:.2f} wrong colour", (x, y + h + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.35,
+                    (255, 0, 255), 1)
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, f"{base}_boxes.png")
     cv2.imwrite(out, boxed)
