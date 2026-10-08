@@ -144,6 +144,9 @@ GET_MATCH = 0.75
 # พื้นหลังช่องของไอเท็ม: ทึบ = ยังเก็บไม่ได้, สว่างปกติ = พร้อมเก็บ (ใช้ร่วมกับป้าย GET! แบบ OR)
 # วัดจริง (V ของ HSV): ทึบ ~64  ปกติ 92-99  ป้าย GET! ~128
 BG_READY_V = 80
+# ตรวจแบบเทียบกับพื้นหลังเดิมของช่องเอง: พื้นหลังสว่างขึ้นจากตอนทึบ >= BG_RISE = เริ่มสว่างแล้ว กดได้เลย
+# (ไม่ต้องรอให้ถึง BG_READY_V เต็มค่า)  None = ปิด   ถ้ากดเร็วไปจนคลิกไม่เข้า ให้เพิ่มค่านี้หรือปิด
+BG_RISE = 10
 
 user32 = ctypes.windll.user32
 
@@ -816,6 +819,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     last_click = {}
     shown_get = {}
     shown_bg = {}
+    bg_base = {}                    # พื้นหลังช่องตอนทึบ (ค่าต่ำสุดที่เคยเห็น)
+    bg_trace = {}                   # (ms, bg) ล่าสุด ไว้ log ว่าสว่างขึ้นแบบค่อยๆ หรือทันที
     collected = []          # ช่องที่เก็บไปแล้ว (ไม่กลับไปกดซ้ำ)
     verify = {}             # ช่องที่เพิ่งกด -> เวลาที่กด (ยืนยันเบื้องหลังว่าเก็บได้ ระหว่างไปช่องถัดไป)
     last_any = [0.0]        # เวลาคลิกล่าสุด (ช่องไหนก็ได้)
@@ -1016,7 +1021,11 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             get_score = _get_score(img, target, scale)
             showing_get = get_score >= GET_MATCH
             bg_v = _slot_bg_v(img, item)
-            bg_ready = bg_v >= BG_READY_V
+            base = bg_base[target] = min(bg_base.get(target, bg_v), bg_v)
+            tr = bg_trace.setdefault(target, [])
+            tr.append((round(elapsed_ms()), round(bg_v, 1)))
+            del tr[:-12]
+            bg_ready = bg_v >= BG_READY_V or (BG_RISE is not None and bg_v - base >= BG_RISE)
             # พร้อมกด = อันใดอันหนึ่ง: ป้าย "GET!" (ตอน hover) / พื้นหลังช่องสว่างปกติ / ไอคอนสีปกติ
             ready = showing_get or bg_ready or sat >= min_sat
             present = showing_get or score >= ITEM_MATCH
@@ -1099,6 +1108,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             clicks[target] += 1
             clicked += 1
             last_click[target] = last_any[0] = time.perf_counter()
+            log.info(f"  bg ก่อนกด (ms,V): {bg_trace.get(target, [])[-8:]}  ฐาน={bg_base.get(target, 0):.1f}")
             by = "+".join(n for n, v in (("GET", showing_get), ("bg", bg_ready), ("sat", sat_ready)) if v) or "-"
             log.info(f"  {t_ready:7.0f}ms  {name} {why} [สัญญาณ: {by}] sat={sat:5.1f} bg={bg_v:5.1f} score={score:.3f} "
                      f"get={get_score:.3f} -> click #{clicks[target]} screen=({hx}, {hy})  "
