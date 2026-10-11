@@ -4,6 +4,7 @@ click_at.py - ทดสอบ "กดที่เวลา X ms หลังห�
     python click_at.py 3997                    กดที่ 3997 ms ช่องแรกที่มีไอเท็ม
     python click_at.py 3950 blue               กดที่ 3950 ms ช่องของไอเท็ม blue (ชื่อ/โปรไฟล์เหมือน main.py)
     python click_at.py 3900 --slot 1,3         กดช่อง แถว1 คอลัมน์3
+    python click_at.py 3900 --slot 1           กดช่องที่ 1 (ซ้ายบนสุด)  เลข 1-21 นับซ้าย->ขวา บน->ล่าง
     python click_at.py 3997 --dry              ไม่คลิกจริง (ดูเวลา/การเลือกช่องเฉยๆ)
 
   เวลานับจากเฟรมแรกที่เห็น Mission Reward (เหมือน timing.py: ปกติสีเปลี่ยนที่ ~3997 ms)
@@ -19,7 +20,7 @@ import time
 import cv2
 
 import click
-from click import (BG_READY_V, HEADER_MATCH, MOUSE_FLAGS, STOP_KEY, _detect_all, _header_score, _hover_point,
+from click import (BG_READY_V, GRID_SIZE, HEADER_MATCH, MOUSE_FLAGS, STOP_KEY, _detect_all, _header_score, _hover_point,
                    _is_empty_slot, _send_mouse, _slot_bg_v, hover)
 from object_detection import get_scale
 from profiles import resolve
@@ -54,8 +55,15 @@ def main():
     slot_arg = None
     if "--slot" in rest:
         i = rest.index("--slot")
-        r, c = rest[i + 1].split(",")
-        slot_arg = (int(r) - 1, int(c) - 1)
+        val = rest[i + 1]
+        if "," in val:                                   # แถว,คอลัมน์
+            r, c = (int(x) - 1 for x in val.split(","))
+        else:                                            # เลขช่อง 1-21 นับจากซ้ายไปขวา บนลงล่าง
+            r, c = divmod(int(val) - 1, GRID_SIZE[0])
+        if not (0 <= r < GRID_SIZE[1] and 0 <= c < GRID_SIZE[0]):
+            print(f"ช่องไม่ถูกต้อง: {val}  (เลข 1-{GRID_SIZE[0] * GRID_SIZE[1]} หรือ แถว,คอลัมน์ เช่น 1,3)")
+            return
+        slot_arg = (r, c)
         del rest[i:i + 2]
     rest = [a for a in rest if not a.startswith("--")]
     names = None
