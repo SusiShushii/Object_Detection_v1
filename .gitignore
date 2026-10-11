@@ -11,3 +11,4 @@ debug_*.png
 crops/
 test_out/
 timing.log
+timing_out/
