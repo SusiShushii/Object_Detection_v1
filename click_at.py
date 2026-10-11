@@ -6,6 +6,7 @@ click_at.py - ทดสอบ "กดที่เวลา X ms หลังห�
     python click_at.py 3900 --slot 1,3         กดช่อง แถว1 คอลัมน์3
     python click_at.py 3900 --slot 1           กดช่องที่ 1 (ซ้ายบนสุด)  เลข 1-21 นับซ้าย->ขวา บน->ล่าง
     python click_at.py 3990,3995,4000,4005,4010   หลายค่า: สลับทีละรอบแบบสุ่ม แล้วสรุป "เข้า/ทั้งหมด" ของแต่ละเวลา
+    python click_at.py 4000 --hold 5,10,20,50  ทดสอบเวลากดค้าง (ms) หลายค่า สลับทีละรอบ  (ใช้ร่วมกับหลายเวลาได้)
     python click_at.py 3997 --dry              ไม่คลิกจริง (ดูเวลา/การเลือกช่องเฉยๆ)
 
   เวลานับจากเฟรมแรกที่เห็น Mission Reward (เหมือน timing.py: ปกติสีเปลี่ยนที่ ~3997 ms)
@@ -51,9 +52,14 @@ def main():
         print(__doc__)
         return
     at_list = [float(x) for x in args[0].split(",")]      # หลายค่า = สลับทีละรอบ (สุ่มลำดับ) เพื่อเทียบผล
-    order, results = [], {t: [] for t in at_list}
+    order, results = [], {}
     rest = args[1:]
     dry = "--dry" in rest
+    hold_list = [None]                                   # None = ใช้ค่า CLICK_HOLD ของ click.py
+    if "--hold" in rest:
+        i = rest.index("--hold")
+        hold_list = [float(x) for x in rest[i + 1].split(",")]      # ms หลายค่า = สลับทีละรอบแบบสุ่ม
+        del rest[i:i + 2]
     slot_arg = None
     if "--slot" in rest:
         i = rest.index("--slot")
@@ -88,8 +94,9 @@ def main():
         f"{'  [dry]' if dry else ''}  หยุด: F12")
 
     def summary():
-        if len(at_list) > 1 or any(results.values()):
-            out("  สรุปสะสม: " + "  ".join(f"{t:.0f}ms={sum(r)}/{len(r)}" for t, r in sorted(results.items()) if r)
+        if len(at_list) > 1 or len(hold_list) > 1 or any(results.values()):
+            lab = lambda k: f"{k[0]:.0f}ms" + ("" if k[1] is None else f"/ค้าง{k[1]:.0f}")
+            out("  สรุปสะสม: " + "  ".join(f"{lab(k)}={sum(r)}/{len(r)}" for k, r in sorted(results.items(), key=lambda z: (z[0][0], z[0][1] or 0)) if r)
                 + "   (เข้า/ทั้งหมด)")
 
     visible = False
@@ -106,6 +113,9 @@ def main():
             if not order:
                 order = random.sample(at_list, len(at_list))      # หนึ่งรอบของลำดับ: ทุกค่าครบก่อนวนใหม่
             at_ms = order.pop()
+            hold_ms = random.choice(hold_list)
+            key = (at_ms, hold_ms)
+            results.setdefault(key, [])
             hover_xy, trace, t_occ, v_hist = None, [], 0.0, []
             out(f"=== Mission Reward ขึ้น (0ms)")
         elif score < HEADER_MATCH:
@@ -155,11 +165,11 @@ def main():
             wait_until(target_t)
             t_down = time.perf_counter()
             if not dry:
-                press(*hover_xy)
+                press(*hover_xy, hold=None if hold_ms is None else hold_ms / 1000)
             v_at = _slot_bg_v(img, chosen)
             click_ms = (t_down - t0) * 1000
             clicked, was_ready, ever_ready = t_down, v_at >= BG_READY_V, v_at >= BG_READY_V
-            out(f"  กดจริงที่ {(t_down - t0) * 1000:.1f}ms (ตั้งไว้ {at_ms:.0f}ms)  "
+            out(f"  กดจริงที่ {(t_down - t0) * 1000:.1f}ms (ตั้งไว้ {at_ms:.0f}ms)  กดค้าง {'ค่าเริ่มต้น' if hold_ms is None else f'{hold_ms:.0f}ms'}  "
                 f"ภาพล่าสุดก่อนกด V={v_at:.0f} ({'ปกติ' if v_at >= BG_READY_V else 'ทึบ'}){'  [dry]' if dry else ''}")
             v_hist = []
             continue
@@ -177,12 +187,12 @@ def main():
                     f"{'' if was_ready else '  (ภาพล่าสุดก่อนกดยังทึบ: ถ้ากดเร็วกว่าสีเปลี่ยนเกิน 1 เฟรม แปลว่าเกมรับคลิกก่อนสีเปลี่ยน)'}")
                 done, clicked, chosen, target_t = True, None, None, None    # กดรอบละครั้ง
                 track = None                       # เก็บได้แล้ว: ทึบแว้บหลังจากนี้ไม่ใช่การเปลี่ยนสีจริง เลิกจับ
-                results[at_ms].append(True)
+                results[key].append(True)
                 summary()
             elif since > VERIFY_WINDOW:
                 out(f"  ผล: ไม่เข้า ✗  (หลังกด {VERIFY_WINDOW:.1f}s ไอเท็มยังอยู่  V ล่าสุด {v_hist[-6:]})")
                 done, clicked, chosen, target_t = True, None, None, None
-                results[at_ms].append(False)
+                results[key].append(False)
                 summary()
     summary()
     out("[click_at] จบ")
