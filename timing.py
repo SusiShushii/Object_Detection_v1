@@ -55,6 +55,7 @@ def main():
         now = time.perf_counter()
         if not visible:
             visible, t0, last, first_seen, normal_at, gaps, grabs = True, now, now, {}, {}, [], []
+            dim_seen = set()
             out("=== Mission Reward ขึ้น  (0ms)")
         gaps.append((now - last) * 1000)
         grabs.append(t_grab)
@@ -66,9 +67,11 @@ def main():
             v = _slot_bg_v(img, sl)
             if key not in first_seen:
                 first_seen[key] = ms
+                if v < BG_READY_V:
+                    dim_seen.add(key)
                 out(f"  {ms:6.0f}ms  ช่อง แถว{key[0] + 1} คอลัมน์{key[1] + 1} ขึ้น  (พื้นหลัง V={v:.0f} "
                     f"{'ทึบ' if v < BG_READY_V else 'ปกติ'})")
-            elif key not in normal_at and v >= BG_READY_V and first_seen[key] < ms:
+            elif key in dim_seen and key not in normal_at and v >= BG_READY_V:
                 normal_at[key] = ms
                 out(f"  {ms:6.0f}ms  ช่อง แถว{key[0] + 1} คอลัมน์{key[1] + 1} เปลี่ยนเป็นสีปกติ  (V={v:.0f})  "
                     f"= {ms - first_seen[key]:.0f}ms หลังช่องขึ้น")
