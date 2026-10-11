@@ -77,6 +77,7 @@ def main():
         names = res["names"]
 
     screen = Screen()
+    click.tune_realtime()
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
     slot_rects = dict(slots(scale))

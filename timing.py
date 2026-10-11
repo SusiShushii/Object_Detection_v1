@@ -274,6 +274,8 @@ def main():
 
     from object_detection import get_scale
     from screen import Screen
+    import click as _c
+    _c.tune_realtime()
     screen = Screen()
     box = screen.get_region("mission_reward")
     try:

@@ -199,6 +199,31 @@ def _send_mouse(flag):
     user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
 
 
+def tune_realtime():
+    """ลดความแกว่งของเวลาตอบสนอง (ตัวแปรระบบ): โปรเซสความสำคัญสูง + ตัวจับเวลา 1ms + ปิด garbage collector
+    คืนข้อความสรุปสิ่งที่ตั้งสำเร็จ"""
+    done = []
+    try:
+        ctypes.windll.winmm.timeBeginPeriod(1)                  # sleep() ละเอียด 1ms แทน ~15ms
+        done.append("timer 1ms")
+    except (AttributeError, OSError):
+        pass
+    try:
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetPriorityClass.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        if k32.SetPriorityClass(k32.GetCurrentProcess(), 0x80):   # HIGH_PRIORITY_CLASS
+            done.append("priority HIGH")
+    except (AttributeError, OSError):
+        pass
+    import gc
+    gc.collect()
+    gc.freeze()
+    gc.disable()                                               # ไม่ให้ GC หยุดโปรแกรมกลางจังหวะกด
+    done.append("GC off")
+    return ", ".join(done)
+
+
 def real_move(x, y):
     """ส่งเหตุการณ์เมาส์ขยับ (SendInput แบบพิกัดสัมบูรณ์) ไปที่ (x, y) = เหมือนเมาส์จริงขยับ
     MOVE | ABSOLUTE | VIRTUALDESK  พิกัด 0-65535 บนพื้นที่หน้าจอทั้งหมด"""

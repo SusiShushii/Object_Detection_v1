@@ -16,11 +16,12 @@ main.py - จุดเริ่มต้นโปรแกรม (รันไ�
     python main.py                       -> คลิกทุกไอเท็มใน templates/
 """
 
+import gc
 import sys
 import time
 import traceback
 
-from click import STOP_KEY_NAME, ClickAborted, wait_and_click, wait_gone
+from click import STOP_KEY_NAME, ClickAborted, tune_realtime, wait_and_click, wait_gone
 from object_detection import log
 from profiles import list_profiles, resolve
 from screen import Screen
@@ -53,12 +54,14 @@ def main():
     targets = info["names"] or None             # None = ทุกไอเท็มใน templates/ (ไม่ได้ระบุอะไรเลย)
 
     screen = Screen()
+    tuned = tune_realtime()
     rounds, total_clicked, errors = 0, 0, 0
 
     log.info("#" * 60)
     log.info(f"[main] เริ่มทำงาน  dry_run={dry_run}  จอ={screen.get_screen_rect()[2]}x{screen.get_screen_rect()[3]}")
     if info["profiles"]:
         log.info(f"[main] โปรไฟล์: {', '.join(info['profiles'])}")
+    log.info(f"[main] ลดความแกว่งของเวลา: {tuned}")
     log.info(f"[main] ลำดับความสำคัญ: {' > '.join(targets) if targets else 'ทุกไอเท็มใน templates/'}")
     if info["missing"]:
         log.info(f"[main] หมายเหตุ: หารูปไม่เจอ ข้ามไป: {', '.join(info['missing'])}")
@@ -71,6 +74,7 @@ def main():
             total_clicked += clicked
             log.info(f"[main] จบรอบที่ {rounds}  คลิก {clicked}  (รวมทั้งหมด {total_clicked})")
             wait_gone(screen, targets)
+            gc.collect()                # GC ปิดอยู่ตอนกด -> เก็บกวาดตอนจบรอบ (ไม่กระทบจังหวะกด)
         except ClickAborted as e:
             log.info(f"[main] หยุดทำงาน ({e})  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
             break
