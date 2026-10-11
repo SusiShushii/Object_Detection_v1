@@ -28,6 +28,11 @@ from click import (BG_READY_V, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH,
 from object_detection import BASE_DIR
 
 logging.getLogger("detection").handlers = []
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
 LOG = os.path.join(BASE_DIR, "timing.log")
 OUT = os.path.join(BASE_DIR, "timing_out")
 VIDEO_FPS = 120            # fps ของวิดีโอ (เวลาจริงถูกต้อง: ช่วงจับภาพไม่ทันจะซ้ำเฟรม เฟรมเกินจะถูกข้าม)
