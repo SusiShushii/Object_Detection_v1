@@ -20,8 +20,8 @@ import time
 import cv2
 
 import click
-from click import (BG_READY_V, GRID_SIZE, HEADER_MATCH, MOUSE_FLAGS, STOP_KEY, _detect_all, _header_score, _hover_point,
-                   _is_empty_slot, _send_mouse, _slot_bg_v, hover)
+from click import (BG_READY_V, GRID_SIZE, HEADER_MATCH, STOP_KEY, _detect_all, _header_score, _hover_point,
+                   _is_empty_slot, _slot_bg_v, hover, press)
 from object_detection import get_scale
 from profiles import resolve
 from screen import Screen
@@ -131,9 +131,7 @@ def main():
             wait_until(target_t)
             t_down = time.perf_counter()
             if not dry:
-                _send_mouse(MOUSE_FLAGS["left"][0])
-                time.sleep(random.uniform(0.03, 0.05))
-                _send_mouse(MOUSE_FLAGS["left"][1])
+                press(*hover_xy)
             v_at = _slot_bg_v(img, chosen)
             clicked, was_ready, ever_ready = t_down, v_at >= BG_READY_V, v_at >= BG_READY_V
             out(f"  กดจริงที่ {(t_down - t0) * 1000:.1f}ms (ตั้งไว้ {at_ms:.0f}ms)  "

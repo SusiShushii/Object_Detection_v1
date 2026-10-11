@@ -112,7 +112,10 @@ REACTION_TIME = (0.08, 0.16)   # วินาที
 # ระหว่างเลื่อนเมาส์ จับภาพเช็กสถานะทุกกี่ก้าว (จับทุกก้าวบน RDP ทำให้เมาส์ช้า/กระตุก)
 STEP_CHECK_EVERY = 3
 # เวลากดค้างตอนคลิก (วินาที) สุ่ม
-CLICK_HOLD = (0.03, 0.06)
+CLICK_HOLD = (0.05, 0.09)       # กดค้างนานเท่านี้ (วินาที) คลิกคนจริงราว 50-120ms (เดิม 30-60ms เกมอาจพลาด)
+# ก่อนกดส่ง "เหตุการณ์เมาส์ขยับ" จริงเข้า Windows ที่จุดนั้น (SetCursorPos อย่างเดียวเกมบางตัวไม่รับรู้ว่าเมาส์มาแล้ว)
+REAL_MOVE = True
+REAL_MOVE_DWELL = 0.004          # รอหลังส่งเหตุการณ์ขยับ ก่อนกดลง (วินาที)
 MOVE_TIME_FULL_DIST = 1500     # ระยะ (px) ที่ใช้เวลาเต็ม MOVE_TIME[1]
 
 # บันทึกภาพ debug (ตอนเจอ / หาไม่เจอ / คลิก) ไว้ที่โฟลเดอร์ debug/
@@ -194,6 +197,28 @@ def _send_mouse(flag):
     inp = INPUT(type=INPUT_MOUSE)
     inp.mi.dwFlags = flag
     user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+
+def real_move(x, y):
+    """ส่งเหตุการณ์เมาส์ขยับ (SendInput แบบพิกัดสัมบูรณ์) ไปที่ (x, y) = เหมือนเมาส์จริงขยับ
+    MOVE | ABSOLUTE | VIRTUALDESK  พิกัด 0-65535 บนพื้นที่หน้าจอทั้งหมด"""
+    vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)        # มุมซ้ายบนของจอรวม
+    vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+    inp = INPUT(type=INPUT_MOUSE)
+    inp.mi.dx = int((x - vx) * 65535 / max(vw - 1, 1))
+    inp.mi.dy = int((y - vy) * 65535 / max(vh - 1, 1))
+    inp.mi.dwFlags = 0x0001 | 0x8000 | 0x4000
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+
+def press(x, y, hold=None):
+    """คลิกซ้ายที่ (x, y) : [เหตุการณ์ขยับจริง] -> กดลง -> ค้าง -> ปล่อย"""
+    if REAL_MOVE:
+        real_move(x, y)
+        time.sleep(REAL_MOVE_DWELL)
+    _send_mouse(MOUSE_FLAGS["left"][0])
+    time.sleep(random.uniform(*CLICK_HOLD) if hold is None else hold)
+    _send_mouse(MOUSE_FLAGS["left"][1])
 
 
 # ---------------------------------------------------------------------------
@@ -1099,6 +1124,9 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 if hovering is not target:      # ไม่ได้ hover รอตัวนี้อยู่ -> ขยับไปหาก่อน
                     move_to(hx, hy)
                     time.sleep(MOVE_DELAY)
+                if REAL_MOVE:
+                    real_move(hx, hy)           # เหตุการณ์ขยับจริงก่อนกด
+                    time.sleep(REAL_MOVE_DWELL)
                 _send_mouse(down)
             t_down = elapsed_ms()
             if not dry_run:
