@@ -8,6 +8,12 @@ import ctypes.wintypes as wt
 import statistics
 import time
 
+import sys
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 lines = []
 
 
@@ -17,10 +23,12 @@ def p(s):
 
 
 class DEVMODE(ctypes.Structure):
-    _fields_ = [("a", ctypes.c_wchar * 32), ("b", wt.WORD), ("c", wt.WORD), ("d", wt.WORD), ("e", wt.WORD),
-                ("f", wt.DWORD), ("pos", ctypes.c_long * 2), ("g", wt.DWORD), ("h", wt.DWORD),
-                ("i", ctypes.c_wchar * 32), ("j", wt.WORD), ("bits", wt.DWORD), ("w", wt.DWORD), ("h2", wt.DWORD),
-                ("k", wt.DWORD), ("hz", wt.DWORD)] + [("pad", ctypes.c_byte * 64)]
+    _fields_ = [("name", ctypes.c_wchar * 32), ("spec", wt.WORD), ("drv", wt.WORD), ("size", wt.WORD),
+                ("extra", wt.WORD), ("fields", wt.DWORD), ("px", ctypes.c_long), ("py", ctypes.c_long),
+                ("orient", wt.DWORD), ("fixed", wt.DWORD), ("color", ctypes.c_short), ("duplex", ctypes.c_short),
+                ("yres", ctypes.c_short), ("tt", ctypes.c_short), ("collate", ctypes.c_short),
+                ("form", ctypes.c_wchar * 32), ("logpix", wt.WORD), ("bits", wt.DWORD), ("w", wt.DWORD),
+                ("h", wt.DWORD), ("flags", wt.DWORD), ("hz", wt.DWORD), ("rest", ctypes.c_byte * 32)]
 
 
 try:
@@ -28,9 +36,9 @@ try:
 except Exception:
     pass
 dm = DEVMODE()
-dm.f = ctypes.sizeof(DEVMODE) - 64
+dm.size = ctypes.sizeof(DEVMODE) - 32
 ok = ctypes.windll.user32.EnumDisplaySettingsW(None, -1, ctypes.byref(dm))
-p(f"จอหลักที่ Windows ใช้: {dm.w}x{dm.h2} @ {dm.hz} Hz" if ok else "อ่านโหมดจอไม่ได้")
+p(f"จอหลักที่ Windows ใช้: {dm.w}x{dm.h} @ {dm.hz} Hz" if ok else "อ่านโหมดจอไม่ได้")
 
 dwm = ctypes.windll.dwmapi
 n = 0
