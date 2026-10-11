@@ -94,6 +94,7 @@ def main():
                 time.sleep(0.003)
                 continue
             visible, t0, miss, chosen, target_t, clicked, done = True, now, 0, None, None, None, False
+            track, saw_dim, ready_ms, click_ms = None, False, None, None
             hover_xy, trace, t_occ, v_hist = None, [], 0.0, []
             out(f"=== Mission Reward ขึ้น (0ms)")
         elif score < HEADER_MATCH:
@@ -105,6 +106,17 @@ def main():
         else:
             miss = 0
         ms = (now - t0) * 1000
+
+        # จับเวลาของช่องที่ทดสอบ: ขึ้นทึบกี่ ms / เปลี่ยนเป็นปกติกี่ ms (ทุกรอบ ไม่ว่ากดเข้าหรือไม่)
+        if track is not None and ready_ms is None:
+            vt = _slot_bg_v(img, track)
+            if vt < BG_READY_V and not saw_dim:
+                saw_dim = True
+                out(f"  {ms:7.1f}ms ช่องนี้ทึบ (V={vt:.0f})")
+            elif vt >= BG_READY_V and saw_dim:
+                ready_ms = ms
+                out(f"  {ms:7.1f}ms ช่องนี้เปลี่ยนเป็นสีปกติ (V={vt:.0f})"
+                    + (f"  (กดไปที่ {click_ms:.0f}ms = กด{'ก่อน' if click_ms < ms else 'หลัง'}ปกติ {abs(ms - click_ms):.0f}ms)" if click_ms is not None else ""))
 
         # เลือกช่อง (ครั้งเดียว) เมื่อไอเท็มขึ้นแล้ว แล้ววางเมาส์รอ
         if chosen is None and not done and ms >= 500 and now - t_occ >= OCC_EVERY:
@@ -125,6 +137,7 @@ def main():
                 out(f"  {ms:7.1f}ms เลือกช่อง x={chosen[0]} y={chosen[1]}  เมาส์รอที่ ({hx}, {hy})  "
                     f"V={_slot_bg_v(img, chosen):.0f}")
                 target_t = t0 + at_ms / 1000
+                track = chosen
 
         # ถึงเวลากด: spin-wait แล้วคลิก (ถ้าเวลายังไม่ถึงกด จะรอในลูปนี้เลย ไม่จับภาพเพิ่ม)
         if chosen is not None and clicked is None and target_t is not None and (target_t - now) < 0.05:
@@ -133,6 +146,7 @@ def main():
             if not dry:
                 press(*hover_xy)
             v_at = _slot_bg_v(img, chosen)
+            click_ms = (t_down - t0) * 1000
             clicked, was_ready, ever_ready = t_down, v_at >= BG_READY_V, v_at >= BG_READY_V
             out(f"  กดจริงที่ {(t_down - t0) * 1000:.1f}ms (ตั้งไว้ {at_ms:.0f}ms)  "
                 f"ภาพล่าสุดก่อนกด V={v_at:.0f} ({'ปกติ' if v_at >= BG_READY_V else 'ทึบ'}){'  [dry]' if dry else ''}")
