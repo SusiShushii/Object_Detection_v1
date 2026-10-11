@@ -107,9 +107,24 @@ class Recorder(threading.Thread):
             cv2.namedWindow("timing monitor", cv2.WINDOW_AUTOSIZE)
             cv2.moveWindow("timing monitor", 0, 0)
         while True:
-            it = self.q.get()
+            try:
+                it = self.q.get(timeout=0.03)
+            except queue.Empty:
+                if self.show:
+                    cv2.waitKey(1)              # ให้หน้าต่างตอบสนองแม้ไม่มีภาพเข้า
+                continue
             if it is None:
                 break
+            if it[0] == "idle":                 # ยังไม่เห็น Mission Reward: โชว์ภาพสดที่จับได้ + สถานะรอ
+                if self.show:
+                    _, img, header = it
+                    big = cv2.resize(img, None, fx=ZOOM, fy=ZOOM, interpolation=cv2.INTER_NEAREST)
+                    bar = np.zeros((BAR_H, big.shape[1], 3), np.uint8)
+                    cv2.putText(bar, f"waiting for Mission Reward...  header={header:.2f}", (6, 18),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1)
+                    cv2.imshow("timing monitor", np.vstack([bar, big]))
+                    cv2.waitKey(1)
+                continue
             if it[0] == "start":
                 _, self.dir, shape, video = it
                 os.makedirs(self.dir, exist_ok=True)
@@ -137,7 +152,7 @@ class Recorder(threading.Thread):
 
 def run(grab, scale, show=True, video=True, stop=lambda: False):
     rec = Recorder(show)
-    visible, rounds, n, miss, header = False, 0, 0, 0, 0.0
+    visible, rounds, n, miss, header, idle_t = False, 0, 0, 0, 0.0, 0.0
     R = {}                                           # สถานะของรอบปัจจุบัน
 
     def finish(why):
@@ -171,6 +186,9 @@ def run(grab, scale, show=True, video=True, stop=lambda: False):
         seen = header >= HEADER_MATCH
         if not visible:
             if not seen:
+                if show and now - idle_t >= 0.05 and rec.q.qsize() < 3:
+                    idle_t = now
+                    rec.q.put(("idle", img.copy(), header))
                 time.sleep(0.005)
                 continue
             visible, rounds, n, miss = True, rounds + 1, 0, 0
