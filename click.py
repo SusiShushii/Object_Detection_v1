@@ -712,7 +712,7 @@ _round_sig = None
 
 
 def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
-                   search_interval=0.03, watch_interval=0.005, check_interval=0.5,
+                   search_interval=0.03, watch_interval=0.0, check_interval=0.5,
                    min_sat=READY_SATURATION, dry_run=False, hold=0.05):
     """รอไอเท็มขึ้นสีปกติแล้วคลิก (1 รอบ = 1 หน้า Mission Result) แบ่งเป็น 2 ช่วง
 
@@ -915,6 +915,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             if lost[0] >= HEADER_LOST_FRAMES:
                 log.info(f"  {elapsed_ms():7.0f}ms  หัวข้อ Mission Reward หายระหว่างขยับเมาส์ -> หยุดขยับ ไม่คลิก")
                 return
+        if REAL_MOVE and not dry_run:
+            real_move(hx, hy)                   # ส่งเหตุการณ์ขยับจริงตอนถึงช่อง ตอนกดจะได้ไม่ต้องเสียเวลาส่งอีก
         hovering = target
         log.info(f"  {elapsed_ms():7.0f}ms  hover รอที่ {item_name(target[0])} x={target[1][0]} y={target[1][1]} "
                  f"screen=({hx}, {hy})  ขยับ{mode} {(time.perf_counter() - t0) * 1000:.0f}ms")
@@ -1124,9 +1126,9 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 if hovering is not target:      # ไม่ได้ hover รอตัวนี้อยู่ -> ขยับไปหาก่อน
                     move_to(hx, hy)
                     time.sleep(MOVE_DELAY)
-                if REAL_MOVE:
-                    real_move(hx, hy)           # เหตุการณ์ขยับจริงก่อนกด
-                    time.sleep(REAL_MOVE_DWELL)
+                    if REAL_MOVE:
+                        real_move(hx, hy)
+                        time.sleep(REAL_MOVE_DWELL)
                 _send_mouse(down)
             t_down = elapsed_ms()
             if not dry_run:
