@@ -5,6 +5,7 @@ click_at.py - ทดสอบ "กดที่เวลา X ms หลังห�
     python click_at.py 3950 blue               กดที่ 3950 ms ช่องของไอเท็ม blue (ชื่อ/โปรไฟล์เหมือน main.py)
     python click_at.py 3900 --slot 1,3         กดช่อง แถว1 คอลัมน์3
     python click_at.py 3900 --slot 1           กดช่องที่ 1 (ซ้ายบนสุด)  เลข 1-21 นับซ้าย->ขวา บน->ล่าง
+    python click_at.py 3990,3995,4000,4005,4010   หลายค่า: สลับทีละรอบแบบสุ่ม แล้วสรุป "เข้า/ทั้งหมด" ของแต่ละเวลา
     python click_at.py 3997 --dry              ไม่คลิกจริง (ดูเวลา/การเลือกช่องเฉยๆ)
 
   เวลานับจากเฟรมแรกที่เห็น Mission Reward (เหมือน timing.py: ปกติสีเปลี่ยนที่ ~3997 ms)
@@ -46,10 +47,11 @@ def wait_until(t_target):
 
 def main():
     args = sys.argv[1:]
-    if not args or not args[0].replace(".", "", 1).isdigit():
+    if not args or not args[0].replace(",", "").replace(".", "").isdigit():
         print(__doc__)
         return
-    at_ms = float(args[0])
+    at_list = [float(x) for x in args[0].split(",")]      # หลายค่า = สลับทีละรอบ (สุ่มลำดับ) เพื่อเทียบผล
+    order, results = [], {t: [] for t in at_list}
     rest = args[1:]
     dry = "--dry" in rest
     slot_arg = None
@@ -81,9 +83,14 @@ def main():
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
     slot_rects = dict(slots(scale))
-    out(f"[click_at] กดที่ {at_ms:.0f}ms หลัง Mission Reward ขึ้น  "
+    out(f"[click_at] กดที่ {','.join(f'{t:.0f}' for t in at_list)}ms หลัง Mission Reward ขึ้น  "
         f"{'ไอเท็ม ' + ','.join(names) if names else ('ช่อง แถว%d คอลัมน์%d' % (slot_arg[0] + 1, slot_arg[1] + 1) if slot_arg else 'ช่องแรกที่มีไอเท็ม')}"
         f"{'  [dry]' if dry else ''}  หยุด: F12")
+
+    def summary():
+        if len(at_list) > 1 or any(results.values()):
+            out("  สรุปสะสม: " + "  ".join(f"{t:.0f}ms={sum(r)}/{len(r)}" for t, r in sorted(results.items()) if r)
+                + "   (เข้า/ทั้งหมด)")
 
     visible = False
     while not stopped():
@@ -96,6 +103,9 @@ def main():
                 continue
             visible, t0, miss, chosen, target_t, clicked, done = True, now, 0, None, None, None, False
             track, saw_dim, ready_ms, click_ms = None, False, None, None
+            if not order:
+                order = random.sample(at_list, len(at_list))      # หนึ่งรอบของลำดับ: ทุกค่าครบก่อนวนใหม่
+            at_ms = order.pop()
             hover_xy, trace, t_occ, v_hist = None, [], 0.0, []
             out(f"=== Mission Reward ขึ้น (0ms)")
         elif score < HEADER_MATCH:
@@ -166,11 +176,20 @@ def main():
                 out(f"  ผล: กดเข้า ✓  ({'ช่องว่าง' if empty else f'ทึบแว้บ V={v:.0f}'} หลังกด {since * 1000:.0f}ms)"
                     f"{'' if was_ready else '  (ภาพล่าสุดก่อนกดยังทึบ: ถ้ากดเร็วกว่าสีเปลี่ยนเกิน 1 เฟรม แปลว่าเกมรับคลิกก่อนสีเปลี่ยน)'}")
                 done, clicked, chosen, target_t = True, None, None, None    # กดรอบละครั้ง
+                track = None                       # เก็บได้แล้ว: ทึบแว้บหลังจากนี้ไม่ใช่การเปลี่ยนสีจริง เลิกจับ
+                results[at_ms].append(True)
+                summary()
             elif since > VERIFY_WINDOW:
                 out(f"  ผล: ไม่เข้า ✗  (หลังกด {VERIFY_WINDOW:.1f}s ไอเท็มยังอยู่  V ล่าสุด {v_hist[-6:]})")
                 done, clicked, chosen, target_t = True, None, None, None
+                results[at_ms].append(False)
+                summary()
+    summary()
     out("[click_at] จบ")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
