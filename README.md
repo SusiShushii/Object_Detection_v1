@@ -30,6 +30,7 @@ python main.py carrot --dry      # ไม่คลิกจริง แค่�
 
 | ไฟล์ | ใช้ทำอะไร |
 |---|---|
+| `prepare_templates.py` | รูปไอเท็มที่ครอปเองจากจอ 2K/1080p ปนกัน: ใส่ `inbox/` -> ตรวจ + ปรับเป็นขนาดมาตรฐาน 62×65 -> `--apply` ลง `templates/` |
 | `crop_templates.py` | ตัดรูปไอเท็มจาก `loot/` ไปไว้ `crops/` (เอาไปเป็น `templates/ชื่อ.png`) |
 | `test_detect.py` | ทดสอบ detect ไอเท็มบนรูปภาพ ไม่แตะเมาส์ |
 | `timing.py` | จับเวลาหน้า Mission Reward ขึ้น / ช่องเปลี่ยนสี (ไม่คลิก) + วิดีโอ monitor |
