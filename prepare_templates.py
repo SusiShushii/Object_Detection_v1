@@ -25,6 +25,12 @@ import crop_templates as ct
 import object_detection as od
 from object_detection import BASE_DIR
 
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
 STD_W, STD_H = 62, 65
 INBOX = os.path.join(BASE_DIR, "inbox")
 EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
