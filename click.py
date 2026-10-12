@@ -15,6 +15,8 @@ from ctypes import wintypes
 import cv2
 import numpy as np
 
+import config
+
 from object_detection import (BASE_DIR, READY_SATURATION, best_score, calibrate, detect, get_adjust,
                               get_scale, item_name, list_templates, load_template, log, saturation,
                               set_adjust, to_gray)
@@ -112,8 +114,7 @@ REACTION_TIME = (0.08, 0.16)   # วินาที
 # ระหว่างเลื่อนเมาส์ จับภาพเช็กสถานะทุกกี่ก้าว (จับทุกก้าวบน RDP ทำให้เมาส์ช้า/กระตุก)
 STEP_CHECK_EVERY = 3
 # เวลากดค้างตอนคลิก (วินาที) สุ่ม
-CLICK_HOLD = (0.015, 0.020)     # กดค้างนานเท่านี้ (วินาที) เกมนับคลิกตอนปล่อยปุ่ม -> สั้นสุดเท่าที่เกมยังรับ (ราว 4 เฟรมเกมที่ 240fps)
-                                # ทดสอบค่าต่ำสุดได้ด้วย: python click_at.py 4000 --hold 5,10,15,20
+CLICK_HOLD = (config.CLICK_HOLD_MS / 1000, config.CLICK_HOLD_MS / 1000)   # กดค้าง (วินาที) เกมนับคลิกตอนปล่อยปุ่ม
 # ก่อนกดส่ง "เหตุการณ์เมาส์ขยับ" จริงเข้า Windows ที่จุดนั้น (SetCursorPos อย่างเดียวเกมบางตัวไม่รับรู้ว่าเมาส์มาแล้ว)
 REAL_MOVE = True
 REAL_MOVE_DWELL = 0.004          # รอหลังส่งเหตุการณ์ขยับ ก่อนกดลง (วินาที)
@@ -132,8 +133,11 @@ LEFT_PENALTY = 2.5
 
 # เก็บทีละช่อง: กดแล้วกลับมาทึบแว้บนึง (หรือช่องว่าง) = เก็บได้แล้ว
 # -> ไปหาไอเท็มชนิดเดียวกันช่องอื่น (ไม่กลับไปกดช่องเดิม) -> รอพร้อมแล้วกด -> วนจนหมด / หน้าจอปิด
-MAX_CLICKS_PER_ITEM = 2        # กดช่องเดียวได้สูงสุดกี่ครั้ง (ครั้งที่ 2 = เผื่อครั้งแรกไม่เข้า) ครบแล้วถือว่าเก็บแล้ว
-RETRY_AFTER = 0.6              # กดแล้วไม่ทึบแว้บนานเท่านี้ (วินาที) = คลิกไม่เข้า -> กดซ้ำ
+# ค่าหลักมาจาก config.py (แก้ที่นั่น)
+MAX_CLICKS_PER_ITEM = config.MAX_CLICKS_PER_ITEM   # กดช่องเดียวได้สูงสุดกี่ครั้ง ครบแล้วถือว่าเก็บแล้ว
+RETRY_AFTER = config.RETRY_AFTER_MS / 1000         # กดแล้วไม่ทึบแว้บนานเท่านี้ (วินาที) = คลิกไม่เข้า -> กดซ้ำ
+CLICK_AT_MS = config.CLICK_AT_MS                   # กดช่องแรกที่เวลานี้หลังหัวข้อขึ้น (None = กดตามสี)
+TIMED_LEAD = 0.012                                 # เริ่มเตรียมกด (เช็กหัวข้อ/หน้าจอ) ก่อนถึงเวลากี่วินาที แล้ว spin รอให้ตรงเวลา
 RETRY_JITTER = (0.8, 1.4)      # สุ่มคูณ RETRY_AFTER ทุกครั้ง (กดซ้ำห่าง ~0.5-0.85 วิ ไม่เป็นจังหวะเป๊ะแบบมาโคร)
 CLICK_GAP = 0.12               # เว้นระยะขั้นต่ำระหว่างคลิก (วินาที) ให้เห็นทึบแว้บของคลิกก่อน (จริง ~65ms)
 REPICK_AFTER = 0.3             # ช่องที่รอเก็บไม่เห็นไอเท็มนานเกินนี้ (วินาที) -> ไปหาช่องอื่น
@@ -171,8 +175,9 @@ MOUSE_FLAGS = {
 }
 # ปุ่มหยุดโปรแกรม (กดค้าง): F12  (ไม่ใช้ ESC เพราะในเกมกด ESC บ่อย -> โปรแกรมหยุดเอง)
 # เปลี่ยนได้ เช่น 0x23 = End, 0x13 = Pause  (ดูรหัสปุ่มได้จาก Virtual-Key Codes ของ Windows)
-STOP_KEY = 0x7B
-STOP_KEY_NAME = "F12"
+_KEYS = {"END": 0x23, "PAUSE": 0x13, **{f"F{i}": 0x6F + i for i in range(1, 13)}}
+STOP_KEY_NAME = config.STOP_KEY_NAME
+STOP_KEY = _KEYS.get(STOP_KEY_NAME.upper(), 0x7B)
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -738,7 +743,7 @@ _round_sig = None
 
 
 def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
-                   search_interval=0.03, watch_interval=0.0, check_interval=0.5,
+                   search_interval=0.002, watch_interval=0.0, check_interval=0.5,
                    min_sat=READY_SATURATION, dry_run=False, hold=0.05):
     """รอไอเท็มขึ้นสีปกติแล้วคลิก (1 รอบ = 1 หน้า Mission Result) แบ่งเป็น 2 ช่วง
 
@@ -783,6 +788,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     targets = []
     detect_ms = 0.0
     diag_stamp = [""]
+    # ตั้งเวลากดไว้ -> ไอเท็มโผล่ช้า (~3 วิ) เป็นเรื่องปกติ ห้ามเริ่มวินิจฉัย/ปรับขนาดรูป (กินเวลา) ก่อนถึงเวลากดไปอีก 1 วิ
+    diag_after = NO_FOUND_DIAG if CLICK_AT_MS is None else max(NO_FOUND_DIAG, CLICK_AT_MS / 1000 + 1.0)
     while not targets:
         if timed_out():
             log.info(f"[wait_and_click] หมดเวลา {timeout}s (ไม่เจอ {names})")
@@ -795,7 +802,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
         if _header_score(img, scale) >= HEADER_MATCH:
             targets = _detect_all(img, names, scale)
             st_ = _loot_state
-            if (not targets and st_["visible"] and time.perf_counter() - st_["since"] >= NO_FOUND_DIAG
+            if (not targets and st_["visible"] and time.perf_counter() - st_["since"] >= diag_after
                     and diag_stamp[0] != st_["stamp"]):
                 diag_stamp[0] = st_["stamp"]
                 # ลองปรับขนาดรูป: ถ้ารูปครอปมาจากจอคนละความละเอียด คะแนนจะต่ำทั้งที่ไอเท็มอยู่ในภาพ
@@ -860,6 +867,12 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     #   "wait_ready" : ช่องใหม่ที่ย้ายมา -> รอพร้อม (ป้าย GET! / พื้นหลังปกติ / สีปกติ) แล้วกด
     #   "clicked"    : กดแล้ว -> ถ้ากลับมาทึบแว้บนึง หรือช่องว่าง = เก็บได้แล้ว -> ไปหาช่องอื่น
     #                  ถ้ายังพร้อมกดอยู่นานเกิน RETRY_AFTER = คลิกไม่เข้า -> กดซ้ำ
+    # จุดเริ่มนับเวลา = เฟรมแรกที่เห็นหัวข้อ Mission Reward (ถ้าไม่ทราบ ใช้ตอนนี้ -> กดช้าลงไม่เคยกดก่อน)
+    t_hdr0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
+    t_due = t_hdr0 + (CLICK_AT_MS or 0) / 1000
+    if CLICK_AT_MS is not None:
+        log.info(f"  ตั้งเวลากดช่องแรกที่ {CLICK_AT_MS}ms หลังหัวข้อ Mission Reward ขึ้น "
+                 f"(ตอนนี้ผ่านไป {(time.perf_counter() - t_hdr0) * 1000:.0f}ms)  กดค้าง {config.CLICK_HOLD_MS}ms")
     pending = list(targets)
     state = {t: "first" for t in pending}
     clicks = {t: 0 for t in pending}
@@ -1129,6 +1142,11 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 why = "GET!" if showing_get else "พร้อมกด"
             elif state[target] == "clicked" and now - last_click[target] >= RETRY_AFTER:
                 why = "ยังพร้อมกดอยู่ (คลิกก่อนหน้าอาจไม่เข้า)"
+            # ตั้งเวลา: ช่องที่ยังไม่เคยกด ถึงเวลา CLICK_AT_MS แล้ว -> กดเลย ไม่รอเห็นสีเปลี่ยน
+            timed = (CLICK_AT_MS is not None and not random_loot and clicks[target] == 0
+                     and state[target] in ("first", "wait_ready") and now >= t_due - TIMED_LEAD)
+            if timed and why is None:
+                why = f"ตั้งเวลา {CLICK_AT_MS}ms"
             if why is None:
                 continue
 
@@ -1145,6 +1163,9 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
             is_open, _ = _screen_open(img, sig)
             if not on_screen or not is_open:
                 continue
+            if timed and not ready:
+                while time.perf_counter() < t_due:      # ตรวจครบแล้ว spin รอให้ถึงเวลาเป๊ะๆ ก่อนกด
+                    time.sleep(0)
 
             t_ready = elapsed_ms()
             hx, hy = hover_pt.setdefault(target, _hover_point(item, region_box))
@@ -1178,7 +1199,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 # กดครั้งเดียว ถือว่าเก็บแล้ว ไม่กลับมากดช่องนี้ซ้ำ -> ไปช่องถัดไปทันที
                 collected.append(item)
                 move_on(target, img, "กดแล้ว (ครั้งเดียว) -> ไปช่องถัดไปทันที")
-            elif not ready:
+            elif not ready and not timed:
                 # กดตอนยังทึบ (CLICK_ON_FOUND) -> ยังไม่นับว่าเก็บ รอช่องนี้พร้อมแล้วกดอีกครั้ง
                 state[target] = "wait_ready"
             else:
