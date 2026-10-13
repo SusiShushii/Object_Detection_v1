@@ -3,6 +3,7 @@ main.py - จุดเริ่มต้นเดียวของโปรแ�
 
     python main.py                       เมนู: เลือกเลขว่าจะทำอะไร
     python main.py run carrot            รันบอทเก็บของ (ชื่อไอเท็ม/โปรไฟล์ได้หลายชื่อ  --dry = ไม่คลิกจริง)
+    python main.py assist [3980]         คุณคุมเมาส์เอง บอทกดคลิกให้ตรงจังหวะ
     python main.py collect               เก็บทุกช่องตามเวลา ไม่ detect ไอเท็ม + บันทึก loot
     python main.py carrot                เหมือน run carrot (พิมพ์ชื่อไอเท็มตรงๆ ได้ เหมือนเดิม)
     python main.py prepare [--apply]     เตรียมรูปไอเท็มที่ครอปเอง  data/inbox -> assets/templates
@@ -38,6 +39,8 @@ COMMANDS = {
             "ชื่อไอเท็ม/โปรไฟล์ เช่น  carrot  หรือ  water_dungeon  (เว้นว่าง = ทุกไอเท็ม)   เพิ่ม --dry = ไม่คลิกจริง"),
     "collect": ("เก็บทุกช่องตามเวลา CLICK_AT_MS โดยไม่ detect ไอเท็ม (ไม่มี false negative) + บันทึกภาพ loot", None,
                 "เว้นว่าง = รันจริง   --dry = ไม่คลิกจริง   (ตั้งเวลา/กดค้างใน config.py)"),
+    "assist": ("คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ (ที่เวลา CLICK_AT_MS หรือที่ระบุ)", None,
+               "เวลา(ms) เช่น  3980   (เว้นว่าง = ค่าใน config.py)   --once = กดครั้งเดียว   --dry"),
     "prepare": ("เตรียมรูปไอเท็มที่ครอปเอง (จอ 2K/1080p ปนกัน) ใส่ data/inbox แล้วตรวจ+ปรับเป็น 62x65", "tools.prepare_templates",
                 "เว้นว่าง = ตรวจรูปใน data/inbox   --apply = บันทึกลง assets/templates   --src 1080 / --force"),
     "crop": ("ครอปรูปไอเท็มอัตโนมัติจากภาพที่บอทบันทึก (output/loot)", "tools.crop_templates",
@@ -56,6 +59,13 @@ COMMANDS = {
 
 def run_command(cmd, rest):
     desc, module, _ = COMMANDS[cmd]
+    if cmd == "assist":
+        if "--help" in rest or "-h" in rest:
+            print(COMMANDS["assist"][2])
+            return
+        from detector.collector import run_assist
+        run_assist(rest)
+        return
     if cmd == "collect":
         if "--help" in rest or "-h" in rest:
             print(COMMANDS["collect"][2])

@@ -227,3 +227,107 @@ def run_collect(argv):
                 screen = Screen()
             except KeyboardInterrupt:
                 break
+
+
+# ---------------------------------------------------------------------------
+# โหมดช่วยกด (python main.py assist)  คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ
+# ---------------------------------------------------------------------------
+
+def assist_round(screen, at_ms, clicks, dry_run=False):
+    """1 รอบ: รอหัวข้อ Mission Reward -> ที่ at_ms กดคลิกตรงที่เมาส์อยู่ (ไม่ขยับเมาส์ ไม่เลือกช่อง)
+    clicks > 1 = กดซ้ำทุก config.RETRY_AFTER_MS  คืนจำนวนคลิก"""
+    scale = get_scale(screen)
+    box = screen.get_region("mission_reward")
+    down, up = ck.MOUSE_FLAGS["left"]
+
+    while True:                                                   # รอหัวข้อ (ทุกเฟรม) + บันทึกภาพ loot
+        if esc_pressed():
+            raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+        img = screen.grab(box)
+        _loot_log(img, scale)
+        if _header_score(img, scale) >= HEADER_MATCH:
+            break
+        time.sleep(0.002)
+    t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000
+    times = [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]
+    log.info("=" * 60)
+    log.info(f"[assist] เห็น Mission Reward  จะกดที่ " + ", ".join(f"{t:.0f}" for t in times)
+             + f" ms  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้){'  [dry_run]' if dry_run else ''}")
+
+    state = {"miss": 0, "last_hdr": 0.0}
+
+    def alive(frame):
+        _loot_log(frame, scale)
+        now = time.perf_counter()
+        if now - state["last_hdr"] >= HDR_EVERY:
+            state["last_hdr"] = now
+            state["miss"] = 0 if _header_score(frame, scale) >= HEADER_MATCH else state["miss"] + 1
+        return state["miss"] < ck.HEADER_LOST_FRAMES
+
+    done = 0
+    for k, at in enumerate(times):
+        due = t0 + at / 1000
+        while time.perf_counter() < due - TIMED_LEAD:
+            if esc_pressed():
+                raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+            if not alive(screen.grab(box)):
+                log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนถึงเวลากด -> ไม่คลิก")
+                return done
+        if _header_score(screen.grab(box), scale) < HEADER_MATCH:     # เช็กสดก่อนกดทุกครั้ง
+            log.info(f"  {ms():7.0f}ms  ไม่เห็นหัวข้อก่อนกด -> ไม่คลิก")
+            return done
+        x, y = ck.get_cursor()
+        if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):      # กันคลิกนอกกรอบรางวัลโดยไม่ตั้งใจ
+            log.info(f"  {ms():7.0f}ms  เมาส์อยู่นอกกรอบรางวัล ({x}, {y}) -> ไม่คลิก (วางเมาส์บนช่องที่ต้องการก่อน)")
+            return done
+        while time.perf_counter() < due:
+            time.sleep(0)
+        t = ms()
+        if not dry_run:
+            ck._send_mouse(down)
+            time.sleep(random.uniform(*ck.CLICK_HOLD))
+            ck._send_mouse(up)
+        done += 1
+        log.info(f"  {t:7.0f}ms  กดครั้งที่ {k + 1} ตรงที่เมาส์อยู่ screen=({x}, {y})  (ตั้งไว้ {at:.0f}ms)")
+    return done
+
+
+def run_assist(argv):
+    dry_run = "--dry" in argv
+    once = "--once" in argv
+    nums = [a for a in argv if not a.startswith("--")]
+    at_ms = float(nums[0]) if nums else config.CLICK_AT_MS
+    if at_ms is None:
+        print("ใส่เวลากด (ms) เช่น  python main.py assist 3988  หรือตั้ง CLICK_AT_MS ใน config.py")
+        return
+    clicks = 1 if once else max(1, config.MAX_CLICKS_PER_ITEM)
+    screen = Screen()
+    tuned = tune_realtime()
+    log.info("#" * 60)
+    log.info(f"[assist] เริ่มทำงาน (คุณคุมเมาส์ บอทกดให้ตรงจังหวะ)  dry_run={dry_run}  กดที่ {at_ms:.0f}ms  "
+             f"{clicks} ครั้ง ห่าง {config.RETRY_AFTER_MS}ms  กดค้าง {config.CLICK_HOLD_MS}ms  {tuned}  "
+             f"กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
+    rounds, total, errors = 0, 0, 0
+    while True:
+        try:
+            n = assist_round(screen, at_ms, clicks, dry_run)
+            rounds += 1
+            total += n
+            log.info(f"[assist] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
+            wait_closed(screen)
+        except ClickAborted as e:
+            log.info(f"[assist] หยุดทำงาน ({e})  {rounds} รอบ  คลิกรวม {total}  error {errors} ครั้ง")
+            break
+        except KeyboardInterrupt:
+            log.info(f"[assist] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total}  error {errors} ครั้ง")
+            break
+        except Exception:
+            errors += 1
+            log.info(f"[assist] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {config.ERROR_RETRY_DELAY:.0f} วินาที\n"
+                     + traceback.format_exc())
+            try:
+                time.sleep(config.ERROR_RETRY_DELAY)
+                screen = Screen()
+            except KeyboardInterrupt:
+                break
