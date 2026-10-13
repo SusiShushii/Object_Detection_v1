@@ -1,5 +1,5 @@
 """
-click.py - คลิกเมาส์ตามตำแหน่งที่ detect เจอ (Windows API ผ่าน ctypes)
+clicker.py - คลิกเมาส์ตามตำแหน่งที่ detect เจอ (Windows API ผ่าน ctypes)
 
 ระหว่างทำงาน กด F12 ค้างไว้เพื่อหยุดได้ทันที (STOP_KEY)
 """
@@ -17,7 +17,8 @@ import numpy as np
 
 import config
 
-from object_detection import (BASE_DIR, READY_SATURATION, best_score, calibrate, detect, get_adjust,
+from . import paths
+from .detection import (BASE_DIR, READY_SATURATION, best_score, calibrate, detect, get_adjust,
                               get_scale, item_name, list_templates, load_template, log, saturation,
                               set_adjust, to_gray)
 
@@ -40,7 +41,7 @@ ITEM_MATCH = 0.75
 # โหมด random loot: ช่องเป็นกล่อง "?" ไอเท็มที่เปิดออกมาอาจไม่ขึ้นสีเลย -> กดทันทีที่เจอ
 # ภาพกล่อง "?" อยู่ใน markers/ (ไม่ใช่ templates/ จะได้ไม่ถูกนับเป็นไอเท็มที่ต้องคลิก)
 # วัดจริง: random loot = 1.000  โหมดปกติ <= 0.39
-LOOT_BOX = os.path.join(BASE_DIR, "markers", "loot_box.png")
+LOOT_BOX = os.path.join(paths.MARKERS, "loot_box.png")
 LOOT_MATCH = 0.75
 
 # True  = กดช่องละครั้งเดียว แล้วถือว่าเก็บแล้ว ไม่ย้อนกลับมากดซ้ำ
@@ -60,7 +61,7 @@ CLICK_ON_FOUND = False
 #   ด่านที่เป็นสีปกติตั้งแต่แรก -> ได้แค่ภาพ normal
 #   บันทึกเฉพาะตอนมีไอเท็มในกรอบ: กรอบว่าง (ของยังไม่ขึ้น / เก็บหมดแล้ว) ไม่บันทึก
 # วัดจริง: หน้า Mission Result >= 0.90  ฉากเกม <= 0.38
-HEADER_MARKER = os.path.join(BASE_DIR, "markers", "mission_reward.png")
+HEADER_MARKER = os.path.join(paths.MARKERS, "mission_reward.png")
 HEADER_MATCH = 0.65
 # หัวข้อ "Mission Reward" ต้องเห็นอยู่เสมอ ถึงจะหาไอเท็ม / ขยับเมาส์ / คลิก
 # (กันคลิกมั่วเมื่อไม่ได้อยู่หน้า Mission Result เช่น ฉากเกมที่มีแครอทบนพื้นจับผิด หรือหน้าจอปิดไปแล้ว)
@@ -75,11 +76,11 @@ HEADER_CHECK_EVERY = 0.04
 BOX_MIN_SCORE = 0.68      # ช่องว่างได้ ~0.6 กับรูปที่มีขอบช่องติดมา (เช่น carrot) จึงตั้งสูงกว่านั้นกันภาพรก
 NO_FOUND_DIAG = 1.5
 SAVE_LOOT = True
-LOOT_DIR = os.path.join(BASE_DIR, "loot")
+LOOT_DIR = paths.LOOT
 LOOT_SETTLE = 0.3          # เห็นหัวข้อแล้วรออย่างน้อยเท่านี้ก่อนบันทึก (วินาที)
 LOOT_STABLE = 0.3          # จำนวนไอเท็มในกรอบต้องไม่เปลี่ยนนานเท่านี้ (= ขึ้นครบแล้ว) ก่อนบันทึกภาพแรก
 # ช่องว่าง: เทียบกับภาพช่องว่าง วัดจริง ช่องว่าง >= 0.94  ช่องที่มีไอเท็ม (ทึบ/ปกติ/GET!/กล่อง ?) <= 0.65
-EMPTY_SLOT = os.path.join(BASE_DIR, "markers", "empty_slot.png")
+EMPTY_SLOT = os.path.join(paths.MARKERS, "empty_slot.png")
 EMPTY_MATCH = 0.85
 LOOT_CHECK_EVERY = 0.1     # เช็กพื้นหลังทั้งกรอบทุกกี่วินาที
 
@@ -122,7 +123,7 @@ MOVE_TIME_FULL_DIST = 1500     # ระยะ (px) ที่ใช้เวล�
 
 # บันทึกภาพ debug (ตอนเจอ / หาไม่เจอ / คลิก) ไว้ที่โฟลเดอร์ debug/
 SAVE_DEBUG = True
-DEBUG_DIR = os.path.join(BASE_DIR, "debug")
+DEBUG_DIR = paths.DEBUG
 
 # ลำดับการเก็บ:
 #   1) ตามลำดับความสำคัญ = ลำดับชื่อที่พิมพ์ตอนรัน เช่น  python main.py skybug_spike skybug_tail
@@ -146,7 +147,7 @@ GONE_AFTER = None              # ไม่เห็นไอเท็มนา�
 
 # เมาส์ hover บนไอเท็มที่พร้อมเก็บ -> เกมเปลี่ยนไอคอนเป็นป้าย "GET!" สีเขียว = สัญญาณกดได้
 # วัดจริง: ป้าย GET! = 1.000  ไอเท็มปกติ/เทา/ช่องว่าง/กล่อง ? <= 0.54
-GET_MARKER = os.path.join(BASE_DIR, "markers", "get.png")
+GET_MARKER = os.path.join(paths.MARKERS, "get.png")
 GET_MATCH = 0.75
 
 # พื้นหลังช่องของไอเท็ม: ทึบ = ยังเก็บไม่ได้, สว่างปกติ = พร้อมเก็บ (ใช้ร่วมกับป้าย GET! แบบ OR)
@@ -1238,28 +1239,3 @@ def wait_gone(screen, names=None, region="mission_reward", interval=0.3, confirm
         if misses < confirm:
             _sleep(interval)
     log.info(f"  หน้า Mission Result ปิดแล้ว (รอ {time.perf_counter() - start:.1f}s)")
-
-
-# ---------------------------------------------------------------------------
-# ทดสอบ: รอไอเท็มขึ้นสีปกติ -> คลิก
-#   python click.py                 -> คลิกทุก template ในโฟลเดอร์ templates/
-#   python click.py carrot skybug_spike  -> คลิกเฉพาะที่ระบุ
-#   python click.py --dry           -> ไม่คลิก แค่ log (ใช้ร่วมกับแบบอื่นได้)
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import sys
-
-    from screen import Screen
-
-    dry_run = "--dry" in sys.argv
-    names = [a for a in sys.argv[1:] if not a.startswith("--")] or None
-
-    for n in range(3, 0, -1):
-        print(f"เริ่มใน {n}... (สลับไปหน้าเกม / กด {STOP_KEY_NAME} ค้างเพื่อหยุด)")
-        time.sleep(1)
-
-    try:
-        wait_and_click(Screen(), names, timeout=30, dry_run=dry_run)
-    except ClickAborted as e:
-        log.info(f"  {e}")

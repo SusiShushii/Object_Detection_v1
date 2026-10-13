@@ -2,11 +2,11 @@
 timing.py - จับภาพเร็วที่สุดเท่าที่ทำได้ แล้วบอกว่าหน้า Mission Reward ขึ้นกี่ ms / แต่ละช่องเปลี่ยนจากทึบเป็นสีปกติกี่ ms
 (ไม่คลิก ไม่ขยับเมาส์)
 
-    python timing.py                 จอ monitor สด + บันทึกวิดีโอทุกรอบ + log   (หยุด: F12 หรือ Ctrl+C)
-    python timing.py --no-window     ไม่เปิดหน้าต่าง monitor
-    python timing.py --no-video      ไม่บันทึกวิดีโอ
-    python timing.py --image loot\\xxx.png ...        ทดสอบกับรูป: วาดกรอบลง timing_out\\ (ไม่จับจอ)
-    python timing.py --selftest dim.png normal.png    ทดสอบทั้งระบบด้วยภาพปลอม: ทึบ -> สีปกติ (ไม่จับจอ)
+    python main.py timing                 จอ monitor สด + บันทึกวิดีโอทุกรอบ + log   (หยุด: F12 หรือ Ctrl+C)
+    python main.py timing --no-window     ไม่เปิดหน้าต่าง monitor
+    python main.py timing --no-video      ไม่บันทึกวิดีโอ
+    python main.py timing --image loot\\xxx.png ...        ทดสอบกับรูป: วาดกรอบลง timing_out\\ (ไม่จับจอ)
+    python main.py timing --selftest dim.png normal.png    ทดสอบทั้งระบบด้วยภาพปลอม: ทึบ -> สีปกติ (ไม่จับจอ)
 
 กรอบในวิดีโอ/หน้าต่าง:  แดง = ทึบ (ยังกดไม่ได้)   เขียว = สีปกติ (กดได้)   เหลือง = เพิ่งเปลี่ยนเป็นสีปกติ (10 เฟรมแรก)
   ข้อความมุมบน: รอบที่ / เฟรมที่ / เวลา ms นับจากเฟรมแรกที่เห็น Mission Reward / fps ตอนนี้
@@ -23,9 +23,9 @@ import time
 import cv2
 import numpy as np
 
-from click import (BG_READY_V, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, STOP_KEY, _header_score,
+from detector.clicker import (BG_READY_V, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, STOP_KEY, _header_score,
                    _is_empty_slot, _slot_bg_v)
-from object_detection import BASE_DIR
+from detector import paths
 
 logging.getLogger("detection").handlers = []
 for _s in (sys.stdout, sys.stderr):
@@ -33,8 +33,9 @@ for _s in (sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, OSError):
         pass
-LOG = os.path.join(BASE_DIR, "timing.log")
-OUT = os.path.join(BASE_DIR, "timing_out")
+os.makedirs(paths.LOGS, exist_ok=True)
+LOG = paths.TIMING_LOG
+OUT = paths.TIMING_OUT
 VIDEO_FPS = 120            # fps ของวิดีโอ (เวลาจริงถูกต้อง: ช่วงจับภาพไม่ทันจะซ้ำเฟรม เฟรมเกินจะถูกข้าม)
 ZOOM = 2                   # ขยายภาพในวิดีโอ/หน้าต่าง
 BAR_H = 26
@@ -272,9 +273,9 @@ def main():
         run(grab, scale_of(dim), show=False, video=video)
         return
 
-    from object_detection import get_scale
-    from screen import Screen
-    import click as _c
+    from detector import clicker as _c
+    from detector.detection import get_scale
+    from detector.screen import Screen
     _c.tune_realtime()
     screen = Screen()
     box = screen.get_region("mission_reward")

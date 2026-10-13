@@ -1,7 +1,7 @@
 """
 analyze_timing.py - สรุปจาก timing.log: เวลาที่ช่องเปลี่ยนจากทึบเป็นสีปกติ "ครั้งแรกของแต่ละรอบ" (ไม่นับช่องหลังจากนั้น)
 
-    python analyze_timing.py [timing.log]
+    python main.py analyze [timing.log]
 
 นับเฉพาะรอบที่เห็นช่องทึบก่อน แล้วเปลี่ยนเป็นปกติ (รอบที่ปกติตั้งแต่เฟรมแรก / รอบทดสอบปลอมที่เร็วกว่า 1.5 วินาที ไม่นับ)
 ข้อมูลมาจาก timing.py ซึ่งไม่คลิก (ไม่ให้การคลิกไปรบกวนเวลา)  ควรเก็บอย่างน้อย 10 รอบ
@@ -11,7 +11,9 @@ import re
 import statistics
 import sys
 
-path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "timing.log")
+from detector import paths
+
+path = sys.argv[1] if len(sys.argv) > 1 else paths.TIMING_LOG
 for _s in (sys.stdout,):
     try:
         _s.reconfigure(encoding="utf-8", errors="replace")
@@ -34,7 +36,7 @@ for line in open(path, encoding="utf-8", errors="replace"):
 use = [r for r in rounds if r["dim"] is not None and r["ready"] is not None and r["ready"] >= 1500]
 print(f"รอบทั้งหมดใน log {len(rounds)}  ใช้ได้ {len(use)} (เห็นทึบแล้วเปลี่ยนเป็นปกติ)")
 if not use:
-    print("ยังไม่มีข้อมูล: รัน python timing.py ก่อนด่านจบ ให้ผลรางวัลขึ้นแบบทึบเอง แล้วปล่อยให้เปลี่ยนสี")
+    print("ยังไม่มีข้อมูล: รัน python main.py timing ก่อนด่านจบ ให้ผลรางวัลขึ้นแบบทึบเอง แล้วปล่อยให้เปลี่ยนสี")
     sys.exit()
 print(f"\n{'เวลา':8} {'ทึบขึ้น':>9} {'เปลี่ยนสี':>10} {'ทึบนาน':>8}  เฟรม")
 for r in use:

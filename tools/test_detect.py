@@ -1,9 +1,9 @@
 """
 test_detect.py - ทดสอบว่า detect ไอเท็มในรูปได้ไหม (ไม่ใช้เมาส์ ไม่จับหน้าจอ ไม่คลิก)
 
-    python test_detect.py img001.png blue_seaweed
-    python test_detect.py img001.png img002.png water_dungeon     (หลายรูป / ชื่อโปรไฟล์ได้)
-    python test_detect.py loot\\20261008_202107_2_normal.png        (ไม่ใส่ชื่อ = ทุกไอเท็มใน templates/)
+    python main.py test img001.png blue_seaweed
+    python main.py test img001.png img002.png water_dungeon     (หลายรูป / ชื่อโปรไฟล์ได้)
+    python main.py test loot\\20261008_202107_2_normal.png        (ไม่ใส่ชื่อ = ทุกไอเท็มใน templates/)
 
 รูปที่ใส่ได้ 2 แบบ (เดาให้เองจากขนาด):
   - รูปกรอบ Mission Reward ที่โปรแกรมบันทึก (loot/*.png, debug/*.png)
@@ -20,20 +20,21 @@ import sys
 import cv2
 import numpy as np
 
-import object_detection as od
-from object_detection import (BADGE_START, calibrate, colour_cos, detect, get_adjust, item_name,
+from detector import detection as od
+from detector.detection import (BADGE_START, calibrate, colour_cos, detect, get_adjust, item_name,
                               list_templates, load_template, match_map, saturation, set_adjust)
-import click
-from profiles import list_profiles, resolve
-from screen import GAME_ASPECT, REGIONS
+from detector import clicker as click
+from detector import paths
+from detector.profiles import list_profiles, resolve
+from detector.screen import GAME_ASPECT, REGIONS
 
 # ไม่เขียน detection.log ตอนทดสอบ
 _lg = logging.getLogger("detection")
 _lg.handlers = [h for h in _lg.handlers if not isinstance(h, logging.FileHandler)]
 _lg.setLevel(logging.WARNING)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(BASE_DIR, "test_out")
+BASE_DIR = paths.ROOT
+OUT_DIR = paths.TEST_OUT
 IMG_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 PAD = 5
 REGION_BASE_W = 525        # ความกว้างกรอบที่จอ 2K ก่อนบวก pad

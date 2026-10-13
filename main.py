@@ -1,84 +1,123 @@
 """
-main.py - เก็บของหน้า Mission Result อัตโนมัติ (รันไปเรื่อยๆ จนกด F12 ค้าง หรือ Ctrl+C)
+main.py - จุดเริ่มต้นเดียวของโปรแกรม (รันบอท + เครื่องมือทั้งหมด)
 
-    python main.py carrot                 เก็บเฉพาะไอเท็มที่ระบุ (ใส่ได้หลายชื่อ ชื่อแรกสำคัญสุด)
-    python main.py water_dungeon          ใช้โปรไฟล์ profiles/Water_Dungeon/priority.txt
-    python main.py                        เก็บทุกไอเท็มใน templates/ (หรือตาม TARGETS ใน config.py)
-    python main.py carrot --dry           ไม่คลิกจริง แค่ log
+    python main.py                       เมนู: เลือกเลขว่าจะทำอะไร
+    python main.py run carrot            รันบอทเก็บของ (ชื่อไอเท็ม/โปรไฟล์ได้หลายชื่อ  --dry = ไม่คลิกจริง)
+    python main.py carrot                เหมือน run carrot (พิมพ์ชื่อไอเท็มตรงๆ ได้ เหมือนเดิม)
+    python main.py prepare [--apply]     เตรียมรูปไอเท็มที่ครอปเอง  data/inbox -> assets/templates
+    python main.py crop                  ครอปรูปไอเท็มจาก output/loot
+    python main.py test รูป.png ชื่อ      ทดสอบ detect บนรูปภาพ
+    python main.py timing                จับเวลาหน้า Mission Reward / ช่องเปลี่ยนสี (ไม่คลิก)
+    python main.py analyze               สรุปสถิติจาก timing.log
+    python main.py clickat 3988 --slot 1 ทดสอบกดที่เวลา X ms
+    python main.py fps                   วัดรอบอัปเดตจอ / ความเร็วจับภาพ
+    python main.py <คำสั่ง> --help        วิธีใช้ของแต่ละคำสั่ง   (python main.py help = รายการนี้)
 
-ตั้งค่าจังหวะกด / กดค้าง / ปุ่มหยุด ที่ config.py   ผล log: detection.log
+ตั้งค่าจังหวะกด / ปุ่มหยุด ที่ config.py   ผลลัพธ์ทั้งหมดอยู่ที่ output/ (log ที่ output/logs/)
 """
 
-import gc
+import os
+import runpy
+import shlex
 import sys
-import time
-import traceback
 
-import config
-from click import STOP_KEY_NAME, ClickAborted, tune_realtime, wait_and_click, wait_gone
-from object_detection import log
-from profiles import list_profiles, resolve
-from screen import Screen
+ROOT = os.path.dirname(os.path.abspath(__file__))
+for _p in (os.path.join(ROOT, "src"), ROOT):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
+# คำสั่ง -> (คำอธิบาย, โมดูล (None = บอทหลัก), คำใบ้การใส่ตัวเลือกในเมนู)
+COMMANDS = {
+    "run": ("รันบอทเก็บของหน้า Mission Result", None,
+            "ชื่อไอเท็ม/โปรไฟล์ เช่น  carrot  หรือ  water_dungeon  (เว้นว่าง = ทุกไอเท็ม)   เพิ่ม --dry = ไม่คลิกจริง"),
+    "prepare": ("เตรียมรูปไอเท็มที่ครอปเอง (จอ 2K/1080p ปนกัน) ใส่ data/inbox แล้วตรวจ+ปรับเป็น 62x65", "tools.prepare_templates",
+                "เว้นว่าง = ตรวจรูปใน data/inbox   --apply = บันทึกลง assets/templates   --src 1080 / --force"),
+    "crop": ("ครอปรูปไอเท็มอัตโนมัติจากภาพที่บอทบันทึก (output/loot)", "tools.crop_templates",
+             "เว้นว่าง = ครอปจาก output/loot   --min 0.8 = เกณฑ์ว่าเป็นไอเท็มเดียวกัน"),
+    "test": ("ทดสอบ detect ไอเท็มบนรูปภาพ (ไม่แตะเมาส์/จอ)", "tools.test_detect",
+             "รูป ตามด้วยชื่อไอเท็ม เช่น  output/loot/xxx.png blue"),
+    "timing": ("จับเวลา Mission Reward ขึ้น / ช่องเปลี่ยนสี + วิดีโอ monitor (ไม่คลิก)", "tools.timing",
+               "เว้นว่าง = เริ่มจับเวลา (F12 หยุด)   --no-window  --no-video"),
+    "analyze": ("สรุปสถิติเวลาเปลี่ยนสีจาก output/logs/timing.log (แนะนำค่า CLICK_AT_MS)", "tools.analyze_timing",
+                "เว้นว่าง = อ่าน output/logs/timing.log"),
+    "clickat": ("ทดสอบกดที่เวลา X ms หลังหัวข้อขึ้น ว่ากดเข้าไหม", "tools.click_at",
+                "เวลา(ms) เช่น  3988 --slot 1 --hold 2   หลายเวลา: 3985,3988,3992"),
+    "fps": ("วัดรอบอัปเดตจอ (Hz) / ความเร็วจับภาพ", "tools.fps_probe", "เว้นว่าง"),
+}
+
+
+def run_command(cmd, rest):
+    desc, module, _ = COMMANDS[cmd]
+    if cmd == "run":
+        if "--help" in rest or "-h" in rest:
+            print(COMMANDS["run"][2])
+            return
+        from detector.app import run
+        run(rest)
+        return
+    sys.argv = [f"main.py {cmd}"] + rest
+    runpy.run_module(module, run_name="__main__")
+
+
+def show_help():
+    print(__doc__)
+    print("คำสั่ง:")
+    for name, (desc, _, hint) in COMMANDS.items():
+        print(f"  {name:<8} {desc}")
+        print(f"           {hint}")
+
+
+def menu():
+    names = list(COMMANDS)
+    while True:
+        print("\n=== Object Detection ===")
+        for i, name in enumerate(names, 1):
+            print(f"  {i}. {name:<8} {COMMANDS[name][0]}")
+        print("  0. ออก")
+        try:
+            pick = input("เลือกเลข: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if pick in ("0", "q", "quit", "exit", ""):
+            return
+        if pick.isdigit() and 1 <= int(pick) <= len(names):
+            cmd = names[int(pick) - 1]
+        elif pick in COMMANDS:
+            cmd = pick
+        else:
+            print("เลือกเลข 0-%d หรือพิมพ์ชื่อคำสั่ง" % len(names))
+            continue
+        print(f"\n[{cmd}] {COMMANDS[cmd][0]}\n  ตัวเลือก: {COMMANDS[cmd][2]}")
+        try:
+            line = input("ใส่ตัวเลือก (กด Enter ถ้าไม่ใส่): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        try:
+            rest = [a.strip('"') for a in shlex.split(line, posix=False)] if line else []
+            run_command(cmd, rest)
+        except KeyboardInterrupt:
+            print("\n(หยุด)")
+        except SystemExit:
+            pass
 
 
 def main():
-    dry_run = "--dry" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--")] or config.TARGETS or []
-
-    info = resolve(args)                     # ชื่อโปรไฟล์ -> อ่าน priority.txt  นอกนั้นเป็นชื่อไอเท็ม
-    for e in info["errors"]:
-        print(f"ผิดพลาด: {e}")
-    if info["errors"]:
+    args = sys.argv[1:]
+    if not args:
+        menu()
         return
-    if info["missing"]:
-        print(f"ไม่พบรูปไอเท็ม {info['missing']} (ต้องมีไฟล์ชื่อนี้.png ใน templates/ หรือโฟลเดอร์โปรไฟล์)")
-        print(f"ที่มี: {info['available']}")
-        print(f"โปรไฟล์ที่มี: {list_profiles() or '(ยังไม่มี)'}")
-        if not info["names"]:
-            return
-        print("-> เก็บเฉพาะที่หารูปเจอต่อไป")
-    targets = info["names"] or None          # None = ทุกไอเท็มใน templates/
-
-    screen = Screen()
-    tuned = tune_realtime()
-    rounds, total_clicked, errors = 0, 0, 0
-
-    w, h = screen.get_screen_rect()[2:4]
-    timing = (f"กดที่ {config.CLICK_AT_MS}ms หลังหัวข้อขึ้น" if config.CLICK_AT_MS is not None else "กดตามสีเปลี่ยน")
-    log.info("#" * 60)
-    log.info(f"[main] เริ่มทำงาน  dry_run={dry_run}  จอ={w}x{h}  {timing}  กดค้าง {config.CLICK_HOLD_MS}ms")
-    if info["profiles"]:
-        log.info(f"[main] โปรไฟล์: {', '.join(info['profiles'])}")
-    log.info(f"[main] ลำดับความสำคัญ: {' > '.join(targets) if targets else 'ทุกไอเท็มใน templates/'}")
-    if info["missing"]:
-        log.info(f"[main] หมายเหตุ: หารูปไม่เจอ ข้ามไป: {', '.join(info['missing'])}")
-    log.info(f"[main] ลดความแกว่งของเวลา: {tuned}  กด {STOP_KEY_NAME} ค้าง หรือ Ctrl+C เพื่อหยุด")
-
-    while True:
-        try:
-            clicked = wait_and_click(screen, targets, timeout=None, dry_run=dry_run)
-            rounds += 1
-            total_clicked += clicked
-            log.info(f"[main] จบรอบที่ {rounds}  คลิก {clicked}  (รวมทั้งหมด {total_clicked})")
-            wait_gone(screen, targets)
-            gc.collect()                     # GC ปิดอยู่ตอนกด -> เก็บกวาดตอนจบรอบ (ไม่กระทบจังหวะกด)
-        except ClickAborted as e:
-            log.info(f"[main] หยุดทำงาน ({e})  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
-            break
-        except KeyboardInterrupt:
-            log.info(f"[main] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
-            break
-        except Exception:
-            # error กลางทาง -> บันทึกรายละเอียด แล้วเริ่มใหม่ (ไม่ปิดโปรแกรม)
-            errors += 1
-            log.info(f"[main] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {config.ERROR_RETRY_DELAY:.0f} วินาที\n"
-                     + traceback.format_exc())
-            try:
-                time.sleep(config.ERROR_RETRY_DELAY)
-                screen = Screen()            # สร้างตัวจับภาพจอใหม่ (เผื่อ error มาจากจอ)
-            except KeyboardInterrupt:
-                log.info(f"[main] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
-                break
+    first = args[0]
+    if first in ("help", "-h", "--help"):
+        show_help()
+    elif first in COMMANDS:
+        run_command(first, args[1:])
+    else:                                  # python main.py carrot  = run carrot (เหมือนเดิม)
+        run_command("run", args)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """
 profiles.py - โปรไฟล์ต่อดัน: รวมไอเท็มที่จะเก็บ + ลำดับความสำคัญไว้ในไฟล์เดียว
 
-    profiles/Water_Dungeon/priority.txt
+    assets/profiles/Water_Dungeon/priority.txt
 
         # เรียงจากสำคัญที่สุดลงมา (ชื่อ = ชื่อไฟล์รูป ไม่ต้องมี .png)
         Water_Ore
@@ -19,10 +19,11 @@ profiles.py - โปรไฟล์ต่อดัน: รวมไอเท็�
 import os
 import re
 
-from object_detection import item_name, list_templates, use_template_dirs
+from . import paths
+from .detection import item_name, list_templates, use_template_dirs
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROFILES_DIR = os.path.join(BASE_DIR, "profiles")
+BASE_DIR = paths.ROOT
+PROFILES_DIR = paths.PROFILES
 PRIORITY_FILE = "priority.txt"
 
 _NUMBER_PREFIX = re.compile(r"^\s*\d+\s*[.):]\s*|^\s*\d+\s+")      # "1 Water_Ore" / "2. Chopper" / "3) Bow"

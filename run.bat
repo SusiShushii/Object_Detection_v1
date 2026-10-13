@@ -6,6 +6,7 @@ rem ===========================================================================
 rem  run.bat - run main.py with the .venv Python
 rem    run.bat skybug_spike skybug_tail     (priority = order of names)
 rem    run.bat carrot --dry                 (no real clicks, log only)
+rem    run.bat                              (no args = menu: bot / prepare_templates / timing / click_at ...)
 rem  Stop: hold F12 or press Ctrl+C
 rem ===========================================================================
 

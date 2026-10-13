@@ -82,6 +82,7 @@ echo === Done ===
 echo Open a Command Prompt with .venv ready:  venv_cmd.bat
 echo   then type:  python main.py water_dungeon   (profile in profiles\)
 echo               python main.py carrot --dry     (single item)
+echo Menu with every tool:  python main.py   (or run.bat with no arguments)
 echo Or run directly:  run.bat water_dungeon
 echo.
 pause

@@ -124,30 +124,3 @@ class Screen:
     def grab_region(self, name, pad=5):
         """จับภาพเฉพาะ region ตามชื่อ"""
         return self.grab(self.get_region(name, pad))
-
-
-# ---------------------------------------------------------------------------
-# ทดสอบ: python screen.py
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    screen = Screen()  # หรือ Screen(window_title="ชื่อหน้าต่างเกม")
-
-    print("screen rect :", screen.get_screen_rect())
-    print("game rect   :", tuple(round(v) for v in screen.get_game_rect()))
-
-    # ตรวจสูตรกับความละเอียดต่างๆ
-    for w, h in [(1920, 1080), (2560, 1440), (3440, 1440)]:
-        screen.get_screen_rect = lambda w=w, h=h: (0, 0, w, h)
-        print(f"{w}x{h:<5} ->", screen.get_region("mission_reward"))
-    del screen.get_screen_rect
-
-    # จับภาพจริง แล้ววาดกรอบ region ลงไปเพื่อเช็กตำแหน่ง
-    full = screen.grab()
-    left, top, _, _ = screen.get_screen_rect()
-    x1, y1, x2, y2 = screen.get_region("mission_reward")
-    cv2.rectangle(full, (x1 - left, y1 - top), (x2 - left, y2 - top), (0, 0, 255), 2)
-
-    cv2.imwrite("debug_full.png", full)
-    cv2.imwrite("debug_region.png", screen.grab_region("mission_reward"))
-    print("saved debug_full.png, debug_region.png")

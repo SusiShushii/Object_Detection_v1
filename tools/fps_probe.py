@@ -2,11 +2,14 @@
   - DwmFlush: ช่วงเวลาระหว่างการรวมภาพ desktop ของ Windows (DWM) = เพดานที่บอทเห็นภาพใหม่
   - จอ/โหมดที่ Windows ใช้อยู่ (ความละเอียด + Hz)
   - ความเร็วจับภาพของ mss
-ผลเขียนที่ fps_probe.txt"""
+ผลเขียนที่ output/logs/fps_probe.txt"""
 import ctypes
 import ctypes.wintypes as wt
+import os
 import statistics
 import time
+
+from detector import paths
 
 import sys
 for _s in (sys.stdout, sys.stderr):
@@ -69,4 +72,5 @@ try:
         p(f"mss จับกรอบเล็กได้ {k / 2:.0f} ครั้ง/วินาที ({2000 / k:.1f}ms ต่อภาพ)")
 except Exception as e:
     p(f"mss error: {e}")
-open("fps_probe.txt", "w", encoding="utf-8").write("\n".join(lines) + "\n")
+os.makedirs(paths.LOGS, exist_ok=True)
+open(paths.FPS_PROBE_TXT, "w", encoding="utf-8").write("\n".join(lines) + "\n")

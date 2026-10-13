@@ -3,13 +3,9 @@ __pycache__/
 *.pyc
 .venv/
 
-# runtime output
-detection.log
-debug/
-loot/
-debug_*.png
-crops/
-test_out/
-timing.log
-timing_out/
-inbox/
+# สิ่งที่โปรแกรมสร้าง (logs, debug, loot, crops, ผลทดสอบ ...)
+output/
+
+# ข้อมูลที่ผู้ใช้ใส่ (รูปครอปรอตรวจ)
+data/inbox/*
+!data/inbox/.gitkeep

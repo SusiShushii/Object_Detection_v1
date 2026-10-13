@@ -1,7 +1,7 @@
 """
-object_detection.py - หาไอเท็มในภาพด้วย Template Matching (OpenCV)
+detection.py - หาไอเท็มในภาพด้วย Template Matching (OpenCV)
 
-ภาพ template เก็บไว้ที่ templates/<ชื่อ>.png แคปจากจอ 2560x1440
+ภาพ template เก็บไว้ที่ assets/templates/<ชื่อ>.png แคปจากจอ 2560x1440
 ถ้าใช้จอความละเอียดอื่น โค้ดจะย่อ/ขยาย template ให้อัตโนมัติ (ตาม scale)
 """
 
@@ -15,9 +15,12 @@ import numpy as np
 # ตั้งค่า
 # ---------------------------------------------------------------------------
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
-LOG_FILE = os.path.join(BASE_DIR, "detection.log")
+from . import paths
+
+BASE_DIR = paths.ROOT
+TEMPLATE_DIR = paths.TEMPLATES
+LOG_FILE = paths.DETECTION_LOG
+os.makedirs(paths.LOGS, exist_ok=True)
 
 # ความสูงพื้นที่เกมตอนแคป template (2560x1440)
 TEMPLATE_BASE_H = 1440
@@ -352,32 +355,3 @@ def draw(img, found, color=(0, 0, 255)):
         cv2.rectangle(out, (x, y), (x + w, y + h), color, 2)
         cv2.putText(out, f"{score:.2f}", (x, y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
     return out
-
-
-# ---------------------------------------------------------------------------
-# ทดสอบ
-#   python object_detection.py              -> จับภาพจากจอจริง
-#   python object_detection.py shot.png     -> ใช้ภาพแคปทั้งจอ (16:9)
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    import sys
-
-    from screen import REGIONS, Screen
-
-    if len(sys.argv) > 1:
-        # ภาพแคปจากไฟล์: ปรับเป็น 2560x1440 แล้วตัดเฉพาะ region
-        shot = cv2.imread(sys.argv[1])
-        shot = cv2.resize(shot, (2560, 1440), interpolation=cv2.INTER_CUBIC)
-        nx1, ny1, nx2, ny2 = REGIONS["mission_reward"]
-        img = shot[int(ny1 * 1440):int(ny2 * 1440), int(nx1 * 2560):int(nx2 * 2560)]
-        scale = 1.0
-    else:
-        screen = Screen()
-        img = screen.grab_region("mission_reward")
-        scale = get_scale(screen)
-
-    found = detect(img, "carrot", scale=scale)
-
-    cv2.imwrite("debug_detect.png", draw(img, found))
-    log.info("  saved debug_detect.png")

@@ -3,8 +3,8 @@ prepare_templates.py - เตรียมรูปไอเท็มที่ค
 
     1. ใส่รูปครอป 1 รูป = 1 ไอเท็ม ลงโฟลเดอร์ inbox/   ตั้งชื่อไฟล์ = ชื่อไอเท็ม เช่น inbox/blue.png
        (ชื่อก่อนเครื่องหมาย "-" นับเป็นไอเท็มเดียวกัน เช่น blue.png + blue-dim.png)
-    2. python prepare_templates.py             ตรวจ + รายงาน + ภาพสรุป inbox/_report.png (ยังไม่แตะ templates/)
-    3. python prepare_templates.py --apply     ปรับเป็น 62x65 แล้วบันทึกลง templates/  (ไฟล์ต้นฉบับย้ายไป inbox/done/)
+    2. python main.py prepare             ตรวจ + รายงาน + ภาพสรุป inbox/_report.png (ยังไม่แตะ templates/)
+    3. python main.py prepare --apply     ปรับเป็น 62x65 แล้วบันทึกลง templates/  (ไฟล์ต้นฉบับย้ายไป inbox/done/)
 
     --src 1080     บอกว่ารูปทั้งหมดครอปจากจอสูง 1080 (1440 = 2K, 2160 = 4K) ถ้าไม่ใส่ จะเดาจากขนาดรูป
     --force        ทับไฟล์ที่ชื่อซ้ำ / บันทึกแม้ถูกเตือนว่าซ้ำ-ช่องว่าง-สัดส่วนผิด
@@ -21,9 +21,9 @@ import sys
 import cv2
 import numpy as np
 
-import crop_templates as ct
-import object_detection as od
-from object_detection import BASE_DIR
+from detector import detection as od
+from detector import paths
+from tools import crop_templates as ct
 
 for _s in (sys.stdout, sys.stderr):
     try:
@@ -32,7 +32,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 STD_W, STD_H = 62, 65
-INBOX = os.path.join(BASE_DIR, "inbox")
+INBOX = paths.INBOX
 EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 SCREENS = {"4K 3840x2160": 1.5, "2K 2560x1440": 1.0, "1080p 1920x1080": 0.75, "900p 1600x900": 0.625,
            "720p 1280x720": 0.5}
@@ -57,7 +57,7 @@ def flatten(img):
     if img.ndim == 2:
         return cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     if img.shape[2] == 4:
-        ref = cv2.imread(os.path.join(BASE_DIR, "markers", "empty_slot.png"))
+        ref = cv2.imread(os.path.join(paths.MARKERS, "empty_slot.png"))
         bg = ref.reshape(-1, 3).mean(0) if ref is not None else np.array([60, 70, 90.0])
         a = img[..., 3:4].astype(np.float32) / 255
         return (img[..., :3] * a + bg * (1 - a)).astype(np.uint8)
@@ -88,7 +88,7 @@ EMPTY_WARN = 0.72          # คะแนนเทียบรูปช่อง
 
 
 def empty_score(std):
-    ref = cv2.imread(os.path.join(BASE_DIR, "markers", "empty_slot.png"), cv2.IMREAD_GRAYSCALE)
+    ref = cv2.imread(os.path.join(paths.MARKERS, "empty_slot.png"), cv2.IMREAD_GRAYSCALE)
     if ref is None:
         return 0.0
     pad = cv2.copyMakeBorder(cv2.cvtColor(std, cv2.COLOR_BGR2GRAY), 6, 6, 6, 6, cv2.BORDER_REPLICATE)
@@ -243,7 +243,7 @@ def main():
     print(f"\nสรุป: ทั้งหมด {len(results)}  พร้อมบันทึก {len(todo)}  "
           f"ข้าม {len(results) - len(todo)} (ผิดพลาด / ซ้ำกับของเดิม / ช่องว่าง-สัดส่วนผิด)   ภาพสรุป: {os.path.join(inbox, '_report.png')}")
     if not apply:
-        print("ยังไม่บันทึกอะไร  ถ้าตรวจแล้วโอเค รัน: python prepare_templates.py --apply")
+        print("ยังไม่บันทึกอะไร  ถ้าตรวจแล้วโอเค รัน: python main.py prepare --apply")
         return
 
     os.makedirs(out_dir, exist_ok=True)
@@ -253,7 +253,7 @@ def main():
         cv2.imwrite(os.path.join(out_dir, r["name"] + ".png"), r["std"])
         shutil.move(os.path.join(inbox, r["file"]), os.path.join(done, r["file"]))
         print(f"บันทึก {os.path.join(out_dir, r['name'] + '.png')}  ({STD_W}x{STD_H})")
-    print("เสร็จ  ทดสอบ detect ได้ด้วย: python test_detect.py <รูปที่มีไอเท็มนั้น> <ชื่อไอเท็ม>")
+    print("เสร็จ  ทดสอบ detect ได้ด้วย: python main.py test <รูปที่มีไอเท็มนั้น> <ชื่อไอเท็ม>")
 
 
 if __name__ == "__main__":

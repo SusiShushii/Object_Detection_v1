@@ -1,13 +1,13 @@
 """
 click_at.py - ทดสอบ "กดที่เวลา X ms หลังหน้า Mission Reward ขึ้น" แล้วดูว่ากดเข้าไหม (ไว้หาว่ากดเร็วสุดได้เท่าไหร่)
 
-    python click_at.py 3997                    กดที่ 3997 ms ช่องแรกที่มีไอเท็ม
-    python click_at.py 3950 blue               กดที่ 3950 ms ช่องของไอเท็ม blue (ชื่อ/โปรไฟล์เหมือน main.py)
-    python click_at.py 3900 --slot 1,3         กดช่อง แถว1 คอลัมน์3
-    python click_at.py 3900 --slot 1           กดช่องที่ 1 (ซ้ายบนสุด)  เลข 1-21 นับซ้าย->ขวา บน->ล่าง
-    python click_at.py 3990,3995,4000,4005,4010   หลายค่า: สลับทีละรอบแบบสุ่ม แล้วสรุป "เข้า/ทั้งหมด" ของแต่ละเวลา
-    python click_at.py 4000 --hold 5,10,20,50  ทดสอบเวลากดค้าง (ms) หลายค่า สลับทีละรอบ  (ใช้ร่วมกับหลายเวลาได้)
-    python click_at.py 3997 --dry              ไม่คลิกจริง (ดูเวลา/การเลือกช่องเฉยๆ)
+    python main.py clickat 3997                    กดที่ 3997 ms ช่องแรกที่มีไอเท็ม
+    python main.py clickat 3950 blue               กดที่ 3950 ms ช่องของไอเท็ม blue (ชื่อ/โปรไฟล์เหมือน main.py)
+    python main.py clickat 3900 --slot 1,3         กดช่อง แถว1 คอลัมน์3
+    python main.py clickat 3900 --slot 1           กดช่องที่ 1 (ซ้ายบนสุด)  เลข 1-21 นับซ้าย->ขวา บน->ล่าง
+    python main.py clickat 3990,3995,4000,4005,4010   หลายค่า: สลับทีละรอบแบบสุ่ม แล้วสรุป "เข้า/ทั้งหมด" ของแต่ละเวลา
+    python main.py clickat 4000 --hold 5,10,20,50  ทดสอบเวลากดค้าง (ms) หลายค่า สลับทีละรอบ  (ใช้ร่วมกับหลายเวลาได้)
+    python main.py clickat 3997 --dry              ไม่คลิกจริง (ดูเวลา/การเลือกช่องเฉยๆ)
 
   เวลานับจากเฟรมแรกที่เห็น Mission Reward (เหมือน timing.py: ปกติสีเปลี่ยนที่ ~3997 ms)
   ใส่น้อยกว่านั้น = กดก่อนสีเปลี่ยน (ทดสอบว่าเกมรับคลิกก่อนไหม)  รันวนทุกรอบจนกด F12
@@ -21,13 +21,13 @@ import time
 
 import cv2
 
-import click
-from click import (BG_READY_V, GRID_SIZE, HEADER_MATCH, STOP_KEY, _detect_all, _header_score, _hover_point,
+from detector import clicker as click
+from detector.clicker import (BG_READY_V, GRID_SIZE, HEADER_MATCH, STOP_KEY, _detect_all, _header_score, _hover_point,
                    _is_empty_slot, _slot_bg_v, hover, press)
-from object_detection import get_scale
-from profiles import resolve
-from screen import Screen
-from timing import LOG, OCC_EVERY, out, slots
+from detector.detection import get_scale
+from detector.profiles import resolve
+from detector.screen import Screen
+from tools.timing import LOG, OCC_EVERY, out, slots
 
 VERIFY_WINDOW = 1.0         # หลังกด ดูผลกี่วินาที
 LOST_CHECKS = 3

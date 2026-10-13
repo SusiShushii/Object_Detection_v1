@@ -1,9 +1,9 @@
 """
 crop_templates.py - ครอปรูปไอเท็มจากภาพใน loot/ ให้อัตโนมัติ (ไว้ทำรูปใน templates/)
 
-    python crop_templates.py                  -> อ่านภาพจาก loot/ ใส่ผลลัพธ์ที่ crops/
-    python crop_templates.py loot_other       -> อ่านจากโฟลเดอร์อื่น
-    python crop_templates.py --min 0.8        -> เกณฑ์ว่า "เป็นไอเท็มเดียวกัน" (ค่าเริ่มต้น 0.75)
+    python main.py crop                  -> อ่านภาพจาก loot/ ใส่ผลลัพธ์ที่ crops/
+    python main.py crop loot_other       -> อ่านจากโฟลเดอร์อื่น
+    python main.py crop --min 0.8        -> เกณฑ์ว่า "เป็นไอเท็มเดียวกัน" (ค่าเริ่มต้น 0.75)
 
 ทำอะไร:
   - ครอปทุกช่องที่มีไอเท็มในภาพ loot/ (รู้ความละเอียดจากขนาดภาพ จึงใช้ได้กับภาพจากจอทุกขนาด
@@ -23,11 +23,12 @@ import sys
 import cv2
 import numpy as np
 
-import click
-from object_detection import BADGE_START, TEMPLATE_DIR, best_score, list_templates, same_colour
+from detector import clicker as click
+from detector import paths
+from detector.detection import BADGE_START, TEMPLATE_DIR, best_score, list_templates, same_colour
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CROP_DIR = os.path.join(BASE_DIR, "crops")
+BASE_DIR = paths.ROOT
+CROP_DIR = paths.CROPS
 
 STD_W, STD_H = click.SLOT_WH                  # ขนาดช่องมาตรฐานที่จอ 2K (62, 65)
 REGION_BASE_W = 525                           # ความกว้างกรอบ mission_reward ที่จอ 2K ก่อนบวก pad (695 -> 1220)
@@ -87,12 +88,12 @@ def slot_boxes(scale):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    loot_dir = args[0] if args else os.path.join(BASE_DIR, "loot")
+    loot_dir = args[0] if args else paths.LOOT
     min_same = 0.75
     if "--min" in sys.argv:
         min_same = float(sys.argv[sys.argv.index("--min") + 1])
         args = [a for a in args if a != sys.argv[sys.argv.index("--min") + 1]]
-        loot_dir = args[0] if args else os.path.join(BASE_DIR, "loot")
+        loot_dir = args[0] if args else paths.LOOT
 
     files = glob.glob(os.path.join(loot_dir, "*.png"))
     if not files:
@@ -101,7 +102,7 @@ def main():
     # ภาพตอนสีปกติก่อน (ละเอียดกว่าตอนทึบ) แล้วค่อยตอนทึบ ใหม่ก่อนเก่า
     files.sort(key=lambda f: ("_2_normal" not in f, -os.path.getmtime(f)))
 
-    box = cv2.imread(os.path.join(BASE_DIR, "markers", "loot_box.png"))
+    box = cv2.imread(os.path.join(paths.MARKERS, "loot_box.png"))
     box = None if box is None else _top(_gray(box))
     existing = list_templates()
 
