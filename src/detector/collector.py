@@ -323,7 +323,12 @@ def run_assist(argv):
     dry_run = "--dry" in argv
     once = "--once" in argv
     record = "--record" in argv
-    second = None                                   # --second a,b,c : เวลาคลิกครั้งที่ 2 ที่จะทดสอบ (สลับสุ่มทีละรอบ)
+    second, deltas = None, None                     # --second a,b,c = เวลาคลิกที่ 2 (ms จากหัวข้อ)  --after a,b,c = ห่างจากคลิกแรก (ms)
+    if "--after" in argv:
+        i = argv.index("--after")
+        deltas = [float(x) for x in argv[i + 1].split(",")]
+        argv = argv[:i] + argv[i + 2:]
+        record = True
     if "--second" in argv:
         i = argv.index("--second")
         second = [float(x) for x in argv[i + 1].split(",")]
@@ -338,6 +343,8 @@ def run_assist(argv):
     if at_ms is None:
         print("ใส่เวลากด (ms) เช่น  python main.py assist 3988  หรือตั้ง CLICK_AT_MS ใน config.py")
         return
+    if deltas:
+        second = [at_ms + d for d in deltas]            # เวลาคลิกที่ 2 = คลิกแรก + d (ระยะห่างคงที่จากคลิกแรกพอดี)
     clicks = 1 if once else max(1, config.MAX_CLICKS_PER_ITEM)
     if fixed:
         clicks = len(fixed)
@@ -362,11 +369,12 @@ def run_assist(argv):
             n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1, times)
             if second:
                 v = getattr(assist_round, 'verdicts', [])
-                ok2 = next((ok for k, _, ok, _ in v if k == 2), None)
-                if ok2 is not None:
-                    sweep[cand].append(ok2)
+                got2 = [ok for k, _, ok, _ in v if k == 2]
+                if got2:                                          # คลิกที่ 2 ตกช่องว่าง (ชิ้นถัดไปยังไม่ขึ้น) นับเป็นไม่ได้เก็บ
+                    sweep[cand].append(bool(got2[0]))
                 log.info('[assist] สรุปสะสมคลิกที่ 2: ' + '  '.join(
-                    f'{c:.0f}ms={sum(r)}/{len(r)}' for c, r in sorted(sweep.items()) if r) + '   (เก็บได้/ทั้งหมด)')
+                    (f'+{c - at_ms:.0f}ms' if deltas else f'{c:.0f}ms') + f'={sum(r)}/{len(r)}'
+                    for c, r in sorted(sweep.items()) if r) + '   (เก็บได้/ทั้งหมด' + (' คิดเป็น ms หลังคลิกแรก)' if deltas else ')'))
             rounds += 1
             total += n
             log.info(f"[assist] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
