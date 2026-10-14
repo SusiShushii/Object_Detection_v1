@@ -64,8 +64,7 @@ python main.py run carrot --dry          # ไม่คลิกจริง แ
 ### โหมดช่วยกด (`assist`) — คุณคุมเมาส์เอง บอทแค่กดให้ตรงจังหวะ
 
 ```bash
-python main.py assist            # กดต่อเนื่องตาม config จนกว่า Mission Reward จะหายไป (ดูด้านล่าง)
-python main.py assist --legacy   # โหมดเดิม: กด MAX_CLICKS_PER_ITEM ครั้งห่างกัน RETRY_AFTER_MS
+python main.py assist            # กดที่เวลา CLICK_AT_MS ใน config.py (ตอนนี้ 3988)
 python main.py assist 3980       # ระบุเวลาเอง (ms หลังเห็นหัวข้อ Mission Reward)
 python main.py assist --once     # กดครั้งเดียว (ไม่กดซ้ำ)
 python main.py assist --dry      # ไม่คลิกจริง
@@ -78,12 +77,6 @@ python main.py assist 3988 --after 1002,1012,1022 --record
 python main.py assist --first 3992,3996,4000,4004,4008 --record
                                  # ทดสอบเวลาคลิกแรก: สลับสุ่มทีละรอบ แล้วสรุป "เก็บได้/ทั้งหมด" ของแต่ละเวลา (ใช้ร่วมกับ --after ได้)
 ```
-
-**ค่าเริ่มต้น (ไม่ใส่อะไร) = กดต่อเนื่องตาม `config.py` จนกว่า Mission Reward จะหายไป:**
-- ชิ้นที่ 1 กดที่ `CLICK_AT_MS` (3988) แล้วกดกันพลาดอีกครั้งที่ `ASSIST_FIRST_BACKUP_MS` (4000)
-- ชิ้นที่ n กดที่ `CLICK_AT_MS + (n-1) × ASSIST_NEXT_AFTER_MS` (1010) แล้วกดกันพลาดอีกครั้งหลัง `ASSIST_BACKUP_AFTER_MS` (10) ms
-  เช่น 3988 / 4000 → 4998 / 5008 → 6008 / 6018 → ... ทุก 1010 ms ไปเรื่อยๆ จนหัวข้อหาย (ตรงที่เมาส์อยู่ ไม่ขยับ)
-- กดค้าง `CLICK_HOLD_MS` (2)  ถ้าใส่ `--record` จะบันทึกวิดีโอ/trace/timeline **ต่อเนื่องจนกว่าหัวข้อจะหาย** และสรุปว่าแต่ละชิ้น ✓ เก็บได้ / ✗ ไม่เข้า (คลิกหลักกับกันพลาดของชิ้นเดียวกันนับเป็นกลุ่มเดียว)
 
 คุณวางเมาส์บนช่องที่ต้องการเองก่อนหน้า Mission Result ขึ้น บอท**ไม่ขยับเมาส์ ไม่เลือกช่อง ไม่ detect**
 พอเห็นหัวข้อ Mission Reward จะนับเวลา แล้วกดคลิกตรงที่เมาส์อยู่ที่เวลาตั้ง (กดค้าง `CLICK_HOLD_MS`)

@@ -233,11 +233,9 @@ def run_collect(argv):
 # โหมดช่วยกด (python main.py assist)  คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ
 # ---------------------------------------------------------------------------
 
-def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1, times=None, chain=False):
-    """1 รอบ: รอหัวข้อ Mission Reward -> กดคลิกตรงที่เมาส์อยู่ (ไม่ขยับเมาส์ ไม่เลือกช่อง)
-    chain=True: กดต่อเนื่องตาม config (ชิ้นแรก at_ms + กันพลาด, ชิ้นถัดไปทุก ASSIST_NEXT_AFTER_MS + กันพลาด)
-                จนกว่า Mission Reward จะหายไป (บันทึกวิดีโอ/log ต่อจนหัวข้อหายด้วย)
-    chain=False: กดที่ times (หรือ at_ms + k*RETRY_AFTER_MS จำนวน clicks ครั้ง)  record = บันทึกวิดีโอ + วิเคราะห์
+def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1, times=None):
+    """1 รอบ: รอหัวข้อ Mission Reward -> ที่ at_ms กดคลิกตรงที่เมาส์อยู่ (ไม่ขยับเมาส์ ไม่เลือกช่อง)
+    clicks > 1 = กดซ้ำทุก config.RETRY_AFTER_MS  record = บันทึกวิดีโอ + วิเคราะห์ timeline (RoundRecorder)
     คืนจำนวนคลิก"""
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
@@ -253,37 +251,12 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
         time.sleep(0.002)
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
+    times = list(times) if times else [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]
     assist_round.verdicts = []
-
-    def schedule():
-        """คืน (เวลา ms จากหัวข้อ, หมายเลขจังหวะ 1.., ป้าย) ตามลำดับเวลา (chain = ไม่มีที่สิ้นสุด)"""
-        if chain:
-            step, fb, ba = config.ASSIST_NEXT_AFTER_MS, config.ASSIST_FIRST_BACKUP_MS, config.ASSIST_BACKUP_AFTER_MS
-            n = 0
-            while True:
-                p = at_ms + n * step
-                yield p, n + 1, f"ชิ้นที่ {n + 1} (หลัก)"
-                if n == 0 and fb is not None:
-                    yield fb, 1, "ชิ้นที่ 1 (กันพลาด)"
-                elif n > 0 and ba:
-                    yield p + ba, n + 1, f"ชิ้นที่ {n + 1} (กันพลาด +{ba:.0f})"
-                n += 1
-        else:
-            for k, t in enumerate(list(times) if times else [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]):
-                yield t, k + 1, f"ครั้งที่ {k + 1}"
-
     log.info("=" * 60)
-    if chain:
-        fb, ba = config.ASSIST_FIRST_BACKUP_MS, config.ASSIST_BACKUP_AFTER_MS
-        log.info(f"[assist] เห็น Mission Reward  ชิ้นที่ 1 กดที่ {at_ms:.0f}ms" + (f" (+กันพลาด {fb:.0f}ms)" if fb is not None else "")
-                 + f"  ชิ้นถัดไปทุก {config.ASSIST_NEXT_AFTER_MS:.0f}ms" + (f" (+กันพลาด {ba:.0f}ms)" if ba else "")
-                 + f"  กดค้าง {config.CLICK_HOLD_MS}ms  จนกว่า Mission Reward จะหายไป  (เมาส์คุณเอง ไม่ขยับให้)"
-                 + ("  [dry_run]" if dry_run else "") + ("  [บันทึกวิดีโอ]" if record else ""))
-    else:
-        shown = list(times) if times else [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]
-        log.info(f"[assist] เห็น Mission Reward  จะกดที่ " + ", ".join(f"{t:.0f}" for t in shown)
-                 + f" ms  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้){'  [dry_run]' if dry_run else ''}"
-                 + ("  [บันทึกวิดีโอ]" if record else ""))
+    log.info(f"[assist] เห็น Mission Reward  จะกดที่ " + ", ".join(f"{t:.0f}" for t in times)
+             + f" ms  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้){'  [dry_run]' if dry_run else ''}"
+             + ("  [บันทึกวิดีโอ]" if record else ""))
 
     from .recorder import RoundRecorder
     rec = RoundRecorder(scale, box, slot_rects(scale), t0, round_no) if record else None
@@ -304,16 +277,10 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
             state["miss"] = 0 if _header_score(frame, scale) >= HEADER_MATCH else state["miss"] + 1
         return state["miss"] < ck.HEADER_LOST_FRAMES
 
-    def gone(why):
-        if chain:
-            log.info(f"  {ms():7.0f}ms  Mission Reward หายไปแล้ว -> จบรอบ (กดไป {done} ครั้ง)")
-        else:
-            log.info(f"  {ms():7.0f}ms  {why}")
-
     done = 0
     iter_ms = 8.0                                                         # เวลาต่อรอบของลูปรอ (EMA) ไว้ตั้งลีดก่อนถึงเวลากด
     try:
-        for at, grp, label in schedule():
+        for k, at in enumerate(times):
             due = t0 + at / 1000
             while True:
                 t_it = time.perf_counter()
@@ -323,17 +290,15 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
                 if esc_pressed():
                     raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
                 if not alive(grab()):
-                    gone("หัวข้อ Mission Reward หายก่อนถึงเวลากด -> ไม่คลิก")
+                    log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนถึงเวลากด -> ไม่คลิก")
                     return done
                 iter_ms = 0.8 * iter_ms + 0.2 * (time.perf_counter() - t_it) * 1000
             if _header_score(grab(), scale) < HEADER_MATCH:               # เช็กสดก่อนกดทุกครั้ง
-                gone("ไม่เห็นหัวข้อก่อนกด -> ไม่คลิก")
+                log.info(f"  {ms():7.0f}ms  ไม่เห็นหัวข้อก่อนกด -> ไม่คลิก")
                 return done
             x, y = ck.get_cursor()
             if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):      # กันคลิกนอกกรอบรางวัลโดยไม่ตั้งใจ
                 log.info(f"  {ms():7.0f}ms  เมาส์อยู่นอกกรอบรางวัล ({x}, {y}) -> ไม่คลิก (วางเมาส์บนช่องที่ต้องการก่อน)")
-                if chain:
-                    continue                                              # chain: รอจังหวะถัดไป (เผื่อคุณขยับเมาส์กลับมา)
                 return done
             while time.perf_counter() < due:
                 time.sleep(0)
@@ -344,8 +309,8 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
                 ck._send_mouse(up)
             done += 1
             if rec is not None:
-                rec.mark_click(done, t, grp)
-            log.info(f"  {t:7.0f}ms  กด {label} (คลิกที่ {done}) ตรงที่เมาส์อยู่ screen=({x}, {y})  (ตั้งไว้ {at:.0f}ms)")
+                rec.mark_click(k + 1, t)
+            log.info(f"  {t:7.0f}ms  กดครั้งที่ {k + 1} ตรงที่เมาส์อยู่ screen=({x}, {y})  (ตั้งไว้ {at:.0f}ms)")
         if rec is not None:                                              # หลังคลิกครั้งสุดท้าย บันทึกต่ออีก ~0.8 วินาที (ดูช่องทึบแว้บ/ว่าง)
             end = time.perf_counter() + 0.8
             while time.perf_counter() < end:
@@ -364,7 +329,6 @@ def run_assist(argv):
     dry_run = "--dry" in argv
     once = "--once" in argv
     record = "--record" in argv
-    legacy = "--legacy" in argv
     first_list = None                               # --first a,b,c = ทดสอบเวลาคลิกแรก (สลับสุ่มทีละรอบ)
     if "--first" in argv:
         i = argv.index("--first")
@@ -398,16 +362,13 @@ def run_assist(argv):
         clicks = len(fixed)
     if second:
         clicks = 2
-    chain = not (fixed or second or first_list or deltas or once or legacy)    # ค่าเริ่มต้น = กดต่อเนื่องตาม config จนหัวข้อหาย
     sweep, order = {s: [] for s in (second or [])}, []
     sweep1, order1 = {s: [] for s in (first_list or [])}, []
     screen = Screen()
     tuned = tune_realtime()
     log.info("#" * 60)
-    plan = (f"ต่อเนื่อง ชิ้นแรก {at_ms:.0f}ms ชิ้นถัดไปทุก {config.ASSIST_NEXT_AFTER_MS:.0f}ms จนหัวข้อหาย" if chain
-            else f"{clicks} ครั้ง ห่าง {config.RETRY_AFTER_MS}ms")
     log.info(f"[assist] เริ่มทำงาน (คุณคุมเมาส์ บอทกดให้ตรงจังหวะ)  dry_run={dry_run}  กดที่ {at_ms:.0f}ms  "
-             f"{plan}  กดค้าง {config.CLICK_HOLD_MS}ms  {tuned}  "
+             f"{clicks} ครั้ง ห่าง {config.RETRY_AFTER_MS}ms  กดค้าง {config.CLICK_HOLD_MS}ms  {tuned}  "
              f"กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
     rounds, total, errors = 0, 0, 0
     while True:
@@ -425,7 +386,7 @@ def run_assist(argv):
                 cand = order.pop()
                 first_t = cand1 if cand1 is not None else at_ms
                 times = [first_t, first_t + (cand - at_ms)] if deltas else [first_t, cand]
-            n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1, times, chain)
+            n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1, times)
             if first_list:
                 v1 = getattr(assist_round, 'verdicts', [])
                 got1 = [ok for k, _, ok, _ in v1 if k == 1]

@@ -47,7 +47,7 @@ class RoundRecorder:
         os.makedirs(self.dir, exist_ok=True)
         self.frame_no = 0
         self.last = None                       # (ms, img) เฟรมล่าสุด (ไว้เซฟภาพตอนคลิก)
-        self.clicks = []                       # [(n, ms, group)]  group = จังหวะเก็บ (คลิกหลัก + กันพลาด รวมเป็นกลุ่มเดียว)
+        self.clicks = []                       # [(n, ms)]
         self.click_frames = []                 # [(n, frame_no)]
         self.trace = []                        # (ms, V, empty, slot_idx)
         self.last_empty, self.last_empty_t = None, -1e9
@@ -79,8 +79,8 @@ class RoundRecorder:
         self.last = (frame_copy, cur, idx, v, ms, self.frame_no, fps)
         self.q.put(("frame", frame_copy, cur, idx, v, ms, self.frame_no, fps, entry))
 
-    def mark_click(self, n, ms, group=None):
-        self.clicks.append((n, ms, n if group is None else group))
+    def mark_click(self, n, ms):
+        self.clicks.append((n, ms))
         self.click_frames.append((n, self.frame_no))
         if self.last is not None:
             self.q.put(("snap", f"click{n}.png") + self.last)
@@ -151,31 +151,25 @@ class RoundRecorder:
         return out
 
     def _verdicts(self, window=400.0):
-        """ต่อจังหวะ (กลุ่มคลิก): เก็บได้ = ช่องกลายเป็นว่างภายใน window ms หลังคลิกแรกของกลุ่ม หรือ พร้อม->ทึบแว้บ
-        คลิกตอนช่องว่างอยู่แล้ว = ไม่นับ  (คลิกหลัก + กันพลาดห่างกันไม่กี่ ms แยกไม่ออกว่าอันไหนติด จึงนับเป็นกลุ่มเดียว)"""
+        """ต่อคลิก: เก็บได้ = ช่องกลายเป็นว่างภายใน window ms หรือ พร้อม->ทึบแว้บ  คลิกตอนช่องว่างอยู่แล้ว = ไม่นับ"""
         states = self._states()
-        groups = {}
-        for n, t, g in self.clicks:
-            groups.setdefault(g, []).append(t)
         res = []
-        for g, times in sorted(groups.items()):
-            t = min(times)
-            clicks_txt = "คลิก " + ", ".join(f"{x:.0f}" for x in sorted(times))
-            before = [s_ for ms, s_ in states if ms <= t]
+        for n, t in self.clicks:
+            before = [s for ms, s in states if ms <= t]
             prior = before[-1] if before else None
-            after = [(ms, s_) for ms, s_ in states if t < ms <= t + window]
+            after = [(ms, s) for ms, s in states if t < ms <= t + window]
             if prior == "ว่าง":
-                res.append((g, t, None, f"{clicks_txt}  ช่องว่างอยู่แล้วตอนกด (คลิกลงช่องว่าง)"))
+                res.append((n, t, None, "ช่องว่างอยู่แล้วตอนกด (คลิกลงช่องว่าง)"))
                 continue
-            empty = next((ms for ms, s_ in after if s_ == "ว่าง"), None)
-            seq = [prior] + [s_ for _, s_ in after]
+            empty = next((ms for ms, s in after if s == "ว่าง"), None)
+            seq = [prior] + [s for _, s in after]
             flash = next((after[k - 1][0] for k in range(1, len(seq)) if seq[k - 1] == "พร้อม" and seq[k] == "ทึบ"), None)
             if empty is not None:
-                res.append((g, t, True, f"{clicks_txt}  ช่องว่างที่ +{empty - t:.0f}ms  ก่อนกด={prior}"))
+                res.append((n, t, True, f"ช่องว่างที่ +{empty - t:.0f}ms  ก่อนกด={prior}"))
             elif flash is not None:
-                res.append((g, t, True, f"{clicks_txt}  ทึบแว้บที่ +{flash - t:.0f}ms  ก่อนกด={prior}"))
+                res.append((n, t, True, f"ทึบแว้บที่ +{flash - t:.0f}ms  ก่อนกด={prior}"))
             else:
-                res.append((g, t, False, f"{clicks_txt}  ไม่เห็นช่องว่าง/ทึบแว้บใน {window:.0f}ms  ก่อนกด={prior}"))
+                res.append((n, t, False, f"ไม่เห็นช่องว่าง/ทึบแว้บใน {window:.0f}ms  ก่อนกด={prior}"))
         return res
 
     # ---------------- จบรอบ: เขียนไฟล์ + สรุป timeline ----------------
@@ -189,7 +183,7 @@ class RoundRecorder:
             for ms, v, e, i in self.trace:
                 w.writerow([f"{ms:.1f}", "" if v is None else f"{v:.1f}", "" if e is None else int(e), "" if i is None else i + 1])
         events = []                                                      # (ms, ข้อความ)
-        for n, ms, g in self.clicks:
+        for n, ms in self.clicks:
             events.append((ms, f"กดครั้งที่ {n}"))
         prev_state = None
         for ms, v, e, i in self.trace:
@@ -204,11 +198,10 @@ class RoundRecorder:
         for ms, text in events:
             log.info(f"      {ms:8.1f}ms  {text}")
         self.verdicts = self._verdicts()
-        got = sum(1 for _, _, ok, _ in self.verdicts if ok)
         for n, ms, ok, text in self.verdicts:
             mark = "✓ เก็บได้" if ok else ("- " if ok is None else "✗ ไม่เข้า")
-            log.info(f"  [วิเคราะห์] จังหวะที่ {n} ที่ {ms:.0f}ms: {mark}  ({text})")
+            log.info(f"  [วิเคราะห์] คลิกครั้งที่ {n} ที่ {ms:.0f}ms: {mark}  ({text})")
         if len(self.clicks) >= 2:
-            gaps = ", ".join(f"{a[0]}→{b[0]}: {b[1] - a[1]:.0f}" for a, b in zip(self.clicks, self.clicks[1:]))
-            log.info(f"  [วิเคราะห์] ระยะห่างระหว่างคลิก (ms): {gaps}")
+            gaps = ", ".join(f"ครั้งที่ {a[0]}→{b[0]} ห่าง {b[1] - a[1]:.0f}ms" for a, b in zip(self.clicks, self.clicks[1:]))
+            log.info(f"  [วิเคราะห์] ระยะห่างระหว่างคลิก: {gaps}")
         return self.dir
