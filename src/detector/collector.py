@@ -233,7 +233,7 @@ def run_collect(argv):
 # โหมดช่วยกด (python main.py assist)  คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ
 # ---------------------------------------------------------------------------
 
-def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1):
+def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1, times=None):
     """1 รอบ: รอหัวข้อ Mission Reward -> ที่ at_ms กดคลิกตรงที่เมาส์อยู่ (ไม่ขยับเมาส์ ไม่เลือกช่อง)
     clicks > 1 = กดซ้ำทุก config.RETRY_AFTER_MS  record = บันทึกวิดีโอ + วิเคราะห์ timeline (RoundRecorder)
     คืนจำนวนคลิก"""
@@ -251,7 +251,8 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1)
         time.sleep(0.002)
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
-    times = [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]
+    times = list(times) if times else [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]
+    assist_round.verdicts = []
     log.info("=" * 60)
     log.info(f"[assist] เห็น Mission Reward  จะกดที่ " + ", ".join(f"{t:.0f}" for t in times)
              + f" ms  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้){'  [dry_run]' if dry_run else ''}"
@@ -315,18 +316,34 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1)
     finally:
         if rec is not None:
             rec.finish(log)
+            assist_round.verdicts = rec.verdicts
 
 
 def run_assist(argv):
     dry_run = "--dry" in argv
     once = "--once" in argv
     record = "--record" in argv
+    second = None                                   # --second a,b,c : เวลาคลิกครั้งที่ 2 ที่จะทดสอบ (สลับสุ่มทีละรอบ)
+    if "--second" in argv:
+        i = argv.index("--second")
+        second = [float(x) for x in argv[i + 1].split(",")]
+        argv = argv[:i] + argv[i + 2:]
+        record = True                               # ต้องมีวิดีโอ/trace ถึงจะรู้ว่าเก็บได้ไหม
     nums = [a for a in argv if not a.startswith("--")]
+    fixed = None                                    # assist 3988,5000 = กดที่เวลาเหล่านี้เป๊ะๆ ในรอบเดียว
+    if nums and "," in nums[0]:
+        fixed = [float(x) for x in nums[0].split(",")]
+        nums = [str(fixed[0])]
     at_ms = float(nums[0]) if nums else config.CLICK_AT_MS
     if at_ms is None:
         print("ใส่เวลากด (ms) เช่น  python main.py assist 3988  หรือตั้ง CLICK_AT_MS ใน config.py")
         return
     clicks = 1 if once else max(1, config.MAX_CLICKS_PER_ITEM)
+    if fixed:
+        clicks = len(fixed)
+    if second:
+        clicks = 2
+    sweep, order = {s: [] for s in (second or [])}, []
     screen = Screen()
     tuned = tune_realtime()
     log.info("#" * 60)
@@ -336,7 +353,20 @@ def run_assist(argv):
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1)
+            times = fixed
+            if second:
+                if not order:
+                    order = random.sample(second, len(second))
+                cand = order.pop()
+                times = [at_ms, cand]
+            n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1, times)
+            if second:
+                v = getattr(assist_round, 'verdicts', [])
+                ok2 = next((ok for k, _, ok, _ in v if k == 2), None)
+                if ok2 is not None:
+                    sweep[cand].append(ok2)
+                log.info('[assist] สรุปสะสมคลิกที่ 2: ' + '  '.join(
+                    f'{c:.0f}ms={sum(r)}/{len(r)}' for c, r in sorted(sweep.items()) if r) + '   (เก็บได้/ทั้งหมด)')
             rounds += 1
             total += n
             log.info(f"[assist] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")

@@ -44,6 +44,7 @@ class RoundRecorder:
         self.th = threading.Thread(target=self._writer, daemon=True)
         self.th.start()
         self.last_t = None
+        self.verdicts = []                     # [(n, ms, ok หรือ None, ข้อความ)]
 
     # ---------------- ฝั่งจับภาพ (เรียกจากลูปหลัก ต้องเบา) ----------------
     def slot_at(self, cur):
@@ -129,6 +130,35 @@ class RoundRecorder:
         if writer is not None:
             writer.release()
 
+    def _states(self):
+        out = []
+        for ms, v, e, i in self.trace:
+            if v is not None:
+                out.append((ms, "ว่าง" if e else ("พร้อม" if v >= BG_READY_V else "ทึบ")))
+        return out
+
+    def _verdicts(self, window=400.0):
+        """ต่อคลิก: เก็บได้ = ช่องกลายเป็นว่างภายใน window ms หรือ พร้อม->ทึบแว้บ  คลิกตอนช่องว่างอยู่แล้ว = ไม่นับ"""
+        states = self._states()
+        res = []
+        for n, t in self.clicks:
+            before = [s for ms, s in states if ms <= t]
+            prior = before[-1] if before else None
+            after = [(ms, s) for ms, s in states if t < ms <= t + window]
+            if prior == "ว่าง":
+                res.append((n, t, None, "ช่องว่างอยู่แล้วตอนกด (คลิกลงช่องว่าง)"))
+                continue
+            empty = next((ms for ms, s in after if s == "ว่าง"), None)
+            seq = [prior] + [s for _, s in after]
+            flash = next((after[k - 1][0] for k in range(1, len(seq)) if seq[k - 1] == "พร้อม" and seq[k] == "ทึบ"), None)
+            if empty is not None:
+                res.append((n, t, True, f"ช่องว่างที่ +{empty - t:.0f}ms  ก่อนกด={prior}"))
+            elif flash is not None:
+                res.append((n, t, True, f"ทึบแว้บที่ +{flash - t:.0f}ms  ก่อนกด={prior}"))
+            else:
+                res.append((n, t, False, f"ไม่เห็นช่องว่าง/ทึบแว้บใน {window:.0f}ms  ก่อนกด={prior}"))
+        return res
+
     # ---------------- จบรอบ: เขียนไฟล์ + สรุป timeline ----------------
     def finish(self, log):
         self.q.put(None)
@@ -153,6 +183,10 @@ class RoundRecorder:
         log.info(f"  [วิเคราะห์] timeline ช่องใต้เมาส์ ({len(self.trace)} เฟรม  บันทึกที่ {os.path.relpath(self.dir, paths.ROOT)})")
         for ms, text in events:
             log.info(f"      {ms:8.1f}ms  {text}")
+        self.verdicts = self._verdicts()
+        for n, ms, ok, text in self.verdicts:
+            mark = "✓ เก็บได้" if ok else ("- " if ok is None else "✗ ไม่เข้า")
+            log.info(f"  [วิเคราะห์] คลิกครั้งที่ {n} ที่ {ms:.0f}ms: {mark}  ({text})")
         if len(self.clicks) >= 2:
             gaps = ", ".join(f"ครั้งที่ {a[0]}→{b[0]} ห่าง {b[1] - a[1]:.0f}ms" for a, b in zip(self.clicks, self.clicks[1:]))
             log.info(f"  [วิเคราะห์] ระยะห่างระหว่างคลิก: {gaps}")
