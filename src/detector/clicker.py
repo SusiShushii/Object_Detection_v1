@@ -573,6 +573,41 @@ def _header_score(img, scale):
     return -1.0 if np.isnan(v) else v
 
 
+HEADER_POS = (4, 1)           # มุมซ้ายบนของรูปหัวข้อ "Mission Reward" ในกรอบ ที่สเกล 1.0 (วัดจากภาพ loot ที่ใช้งานได้)
+LOCATE_EVERY = 0.3           # ไม่เห็นหัวข้อในกรอบ -> ลองค้นหาในพื้นที่กว้างขึ้นทุกกี่วินาที
+LOCATE_SEARCH = (80, 150)    # ค้นหาเลื่อนได้ ± (แนวนอน, แนวตั้ง) px ที่สเกล 1.0
+LOCATE_MATCH = 0.80          # คะแนนหัวข้อที่ยอมรับตอนค้นหาในพื้นที่กว้าง
+
+
+def locate_header(screen, scale, region="mission_reward"):
+    """หน้าต่างรางวัลเลื่อนจากที่คาดไว้ (เช่นหน้าต่างเกม/แถบ taskbar ต่างไป) หัวข้อจึงหลุดกรอบ:
+    ค้นหาหัวข้อในพื้นที่กว้างกว่ากรอบ ถ้าเจอ ปรับ screen.region_offset ให้กรอบเลื่อนตาม
+    คืน (dx, dy) ที่ปรับเพิ่ม  หรือ None ถ้าไม่เจอ / ตรงที่เดิมอยู่แล้ว"""
+    sx, sy = int(LOCATE_SEARCH[0] * scale), int(LOCATE_SEARCH[1] * scale)
+    x1, y1, x2, y2 = screen.get_region(region)
+    left, top, w, h = screen.get_screen_rect()
+    bx1, by1, bx2, by2 = max(left, x1 - sx), max(top, y1 - sy), min(left + w, x2 + sx), min(top + h, y2 + sy)
+    img = screen.grab((bx1, by1, bx2, by2))
+    _header_score(img[:1, :1], scale)                      # เตรียม cache รูปหัวข้อ
+    marker = _header_cache.get(round(scale, 3))
+    gray = to_gray(img)
+    if marker is None or gray.shape[0] < marker.shape[0] or gray.shape[1] < marker.shape[1]:
+        return None
+    m = cv2.matchTemplate(gray, marker, cv2.TM_CCOEFF_NORMED)
+    fy, fx = np.unravel_index(int(np.nanargmax(m)), m.shape)
+    if float(m[fy, fx]) < LOCATE_MATCH:
+        return None
+    dx = int(fx) - ((x1 - bx1) + int(HEADER_POS[0] * scale))
+    dy = int(fy) - ((y1 - by1) + int(HEADER_POS[1] * scale))
+    if abs(dx) < 3 and abs(dy) < 3:
+        return None
+    ox, oy = getattr(screen, "region_offset", (0, 0))
+    screen.region_offset = (ox + dx, oy + dy)
+    log.info(f"[locate] หน้าต่างรางวัลไม่ได้อยู่ที่เดิม: หัวข้อเลื่อน dx={dx} dy={dy} px (score {float(m[fy, fx]):.2f}) "
+             f"-> ปรับกรอบจับภาพตาม  ออฟเซ็ตรวม {screen.region_offset}")
+    return dx, dy
+
+
 def _is_empty_slot(img, x, y, w, h, scale, margin=6):
     """True ถ้าช่องนี้ว่าง (เหมือนภาพช่องว่าง)"""
     key = round(scale, 3)
@@ -788,6 +823,7 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
     # ---- ช่วงที่ 1: ค้นหา (ยังไม่ log จนกว่าจะเจอ จะได้ไม่รก log ตอนรอนานๆ) ----
     targets = []
     detect_ms = 0.0
+    last_locate = 0.0
     diag_stamp = [""]
     # ตั้งเวลากดไว้ -> ไอเท็มโผล่ช้า (~3 วิ) เป็นเรื่องปกติ ห้ามเริ่มวินิจฉัย/ปรับขนาดรูป (กินเวลา) ก่อนถึงเวลากดไปอีก 1 วิ
     diag_after = NO_FOUND_DIAG if CLICK_AT_MS is None else max(NO_FOUND_DIAG, CLICK_AT_MS / 1000 + 1.0)
@@ -800,7 +836,8 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
         _loot_log(img, scale)
         # หาไอเท็มเฉพาะตอนที่เห็นหัวข้อ "Mission Reward" (= อยู่หน้า Mission Result จริง)
         # ไม่งั้นแครอทในฉากเกมอาจถูกจับเป็นไอเท็ม แล้วเมาส์ไปคลิกกลางฉาก
-        if _header_score(img, scale) >= HEADER_MATCH:
+        hdr_ok = _header_score(img, scale) >= HEADER_MATCH
+        if hdr_ok:
             targets = _detect_all(img, names, scale)
             st_ = _loot_state
             if (not targets and st_["visible"] and time.perf_counter() - st_["since"] >= diag_after
@@ -820,6 +857,10 @@ def wait_and_click(screen, names=None, region="mission_reward", timeout=None,
                 boxed, best = _draw_boxes(img, names, scale)
                 log.info(f"[detect] อยู่หน้า Mission Result แต่ไม่เจอไอเท็มที่สั่งเก็บ (เกณฑ์ 0.75)  "
                          f"คะแนนสูงสุด: {best}  debug: {_save_debug(boxed, 'notfound_boxes')}")
+        if not hdr_ok and time.perf_counter() - last_locate >= LOCATE_EVERY:      # หัวข้อไม่อยู่ในกรอบ: ลองหาในพื้นที่กว้างขึ้น
+            last_locate = time.perf_counter()
+            if locate_header(screen, scale, region):
+                region_box = screen.get_region(region)
         detect_ms = (time.perf_counter() - t0) * 1000
         if not targets:
             _sleep(search_interval)

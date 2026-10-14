@@ -17,7 +17,7 @@ import traceback
 import config
 
 from . import clicker as ck
-from .clicker import (GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, ClickAborted, _header_score,
+from .clicker import (LOCATE_EVERY, locate_header, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, ClickAborted, _header_score,
                       _hover_point, _is_empty_slot, _loot_log, _loot_state, esc_pressed, move_to, real_move,
                       tune_realtime)
 from .detection import get_scale, log
@@ -49,6 +49,7 @@ def collect_round(screen, dry_run=False):
     clicked = 0
 
     # ---- 1) รอหัวข้อ Mission Reward ----
+    last_locate = 0.0
     while True:
         if esc_pressed():
             raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
@@ -56,6 +57,10 @@ def collect_round(screen, dry_run=False):
         _loot_log(img, scale)
         if _header_score(img, scale) >= HEADER_MATCH:
             break
+        if time.perf_counter() - last_locate >= LOCATE_EVERY:           # หัวข้อไม่อยู่ในกรอบ: ลองหาในพื้นที่กว้างขึ้น
+            last_locate = time.perf_counter()
+            if locate_header(screen, scale):
+                box = screen.get_region("mission_reward")
         time.sleep(0.002)
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     due = t0 + (config.CLICK_AT_MS or 0) / 1000
@@ -241,6 +246,7 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
     box = screen.get_region("mission_reward")
     down, up = ck.MOUSE_FLAGS["left"]
 
+    last_locate = 0.0
     while True:                                                   # รอหัวข้อ (ทุกเฟรม) + บันทึกภาพ loot
         if esc_pressed():
             raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
@@ -248,6 +254,10 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
         _loot_log(img, scale)
         if _header_score(img, scale) >= HEADER_MATCH:
             break
+        if time.perf_counter() - last_locate >= LOCATE_EVERY:           # หัวข้อไม่อยู่ในกรอบ: ลองหาในพื้นที่กว้างขึ้น
+            last_locate = time.perf_counter()
+            if locate_header(screen, scale):
+                box = screen.get_region("mission_reward")
         time.sleep(0.002)
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000

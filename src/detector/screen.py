@@ -72,6 +72,7 @@ class Screen:
         self.window_title = window_title
         self.monitor = monitor
         self.sct = mss.MSS()
+        self.region_offset = (0, 0)          # หน้าต่างรางวัลเลื่อนจากตำแหน่งปกติ (dx, dy) px: ตั้งโดย locate_header อัตโนมัติ
 
     # ---- พื้นที่ ----------------------------------------------------------
 
@@ -102,10 +103,11 @@ class Screen:
         nx1, ny1, nx2, ny2 = REGIONS[name]
         gx, gy, gw, gh = self.get_game_rect()
 
-        x1 = int(gx + nx1 * gw) - pad
-        y1 = int(gy + ny1 * gh) - pad
-        x2 = int(gx + nx2 * gw) + pad
-        y2 = int(gy + ny2 * gh) + pad
+        ox, oy = getattr(self, "region_offset", (0, 0))
+        x1 = int(gx + nx1 * gw) - pad + ox
+        y1 = int(gy + ny1 * gh) - pad + oy
+        x2 = int(gx + nx2 * gw) + pad + ox
+        y2 = int(gy + ny2 * gh) + pad + oy
         return x1, y1, x2, y2
 
     # ---- จับภาพ -----------------------------------------------------------
