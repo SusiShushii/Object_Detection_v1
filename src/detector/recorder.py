@@ -29,6 +29,17 @@ CLICK_FLASH_FRAMES = 12
 RED, GREEN, GREY, CYAN, YELLOW = (0, 0, 255), (0, 200, 0), (120, 120, 120), (255, 200, 0), (0, 230, 255)
 
 
+def _patch_v(vch, x, y, w, h):
+    """ค่าเดียวกับ clicker._slot_bg_v แต่คำนวณจากช่อง V ที่แปลงไว้แล้ว (ค่ากลางของ 4 จุดมุม/ขอบช่อง)"""
+    f = lambda a: int(a)
+    p = [vch[y + f(h * .06):y + f(h * .15), x + f(w * .06):x + f(w * .16)],
+         vch[y + f(h * .06):y + f(h * .15), x + f(w * .84):x + f(w * .94)],
+         vch[y + f(h * .46):y + f(h * .55), x + f(w * .03):x + f(w * .10)],
+         vch[y + f(h * .46):y + f(h * .55), x + f(w * .90):x + f(w * .97)]]
+    vals = [float(a.mean()) for a in p if a.size]
+    return float(np.median(vals)) if vals else 0.0
+
+
 class RoundRecorder:
     def __init__(self, scale, box, rects, t0, round_no=1):
         self.scale, self.box, self.rects, self.t0 = scale, box, rects, t0
@@ -39,7 +50,7 @@ class RoundRecorder:
         self.clicks = []                       # [(n, ms)]
         self.click_frames = []                 # [(n, frame_no)]
         self.trace = []                        # (ms, V, empty, slot_idx)
-        self.last_empty, self.last_empty_t = None, 0.0
+        self.last_empty, self.last_empty_t = None, -1e9
         self.q = queue.Queue()
         self.th = threading.Thread(target=self._writer, daemon=True)
         self.th.start()
@@ -59,20 +70,14 @@ class RoundRecorder:
         ms = (now - self.t0) * 1000
         self.frame_no += 1
         idx = self.slot_at(cur)
-        v, empty = None, None
-        if idx is not None:
-            sx, sy, sw, sh, _ = self.rects[idx]
-            v = _slot_bg_v(img, self.rects[idx])
-            if now - self.last_empty_t >= 0.04:                 # เช็กช่องว่างทุก ~40 ms (ถูกกว่าเช็กทุกเฟรม)
-                self.last_empty = _is_empty_slot(img, sx, sy, sw, sh, self.scale)
-                self.last_empty_t = now
-            empty = self.last_empty
+        v = _slot_bg_v(img, self.rects[idx]) if idx is not None else None       # เบา (~0.2 ms)
         fps = 1000 / (ms - self.last_t) if self.last_t is not None and ms > self.last_t else 0
         self.last_t = ms
-        self.trace.append((ms, v, empty, idx))
+        entry = [ms, v, None, idx]                                              # ช่องว่างไหม: thread เขียนเติมให้ (template match หนัก)
+        self.trace.append(entry)
         frame_copy = img.copy()
         self.last = (frame_copy, cur, idx, v, ms, self.frame_no, fps)
-        self.q.put(("frame", frame_copy, cur, idx, v, ms, self.frame_no, fps))
+        self.q.put(("frame", frame_copy, cur, idx, v, ms, self.frame_no, fps, entry))
 
     def mark_click(self, n, ms):
         self.clicks.append((n, ms))
@@ -83,8 +88,9 @@ class RoundRecorder:
     # ---------------- thread วาด + เขียนไฟล์ ----------------
     def _draw(self, img, cur, idx, v, ms, frame_no, fps):
         big = cv2.resize(img, None, fx=ZOOM, fy=ZOOM, interpolation=cv2.INTER_NEAREST)
+        vch = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)[..., 2]                       # V ทั้งภาพครั้งเดียว
         for i, (x, y, w, h, _) in enumerate(self.rects):
-            bv = _slot_bg_v(img, (x, y, w, h, 0))
+            bv = _patch_v(vch, x, y, w, h)
             col = GREEN if bv >= BG_READY_V else RED
             thick = 1
             if i == idx:
@@ -112,7 +118,14 @@ class RoundRecorder:
                 _, name, simg, scur, sidx, sv, sms, sfn, sfps = it
                 cv2.imwrite(os.path.join(self.dir, name), self._draw(simg, scur, sidx, sv, sms, sfn, sfps))
                 continue
-            _, img, cur, idx, v, ms, frame_no, fps = it
+            _, img, cur, idx, v, ms, frame_no, fps, entry = it
+            if idx is not None and ms - self.last_empty_t >= 40:               # เช็กช่องว่างทุก ~40 ms (ใน thread ไม่ถ่วงลูปหลัก)
+                sx, sy, sw, sh, _ = self.rects[idx]
+                self.last_empty = _is_empty_slot(img, sx, sy, sw, sh, self.scale)
+                self.last_empty_t = ms
+            entry[2] = self.last_empty if idx is not None else None
+            if writer is not None and int((ms - self._t_first) / 1000 * VIDEO_FPS) + 1 <= written:
+                continue                                                       # เฟรมนี้ไม่เพิ่มเฟรมวิดีโอ (วิดีโอ 120 fps) ข้ามการวาด
             pic = self._draw(img, cur, idx, v, ms, frame_no, fps)
             if writer is None:
                 h, w = pic.shape[:2]
@@ -163,6 +176,7 @@ class RoundRecorder:
     def finish(self, log):
         self.q.put(None)
         self.th.join(timeout=60)
+        self.trace = [tuple(e) for e in self.trace]
         with open(os.path.join(self.dir, "trace.csv"), "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
             w.writerow(["ms", "V_under_cursor", "empty_under_cursor", "slot_index"])

@@ -278,15 +278,21 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
         return state["miss"] < ck.HEADER_LOST_FRAMES
 
     done = 0
+    iter_ms = 8.0                                                         # เวลาต่อรอบของลูปรอ (EMA) ไว้ตั้งลีดก่อนถึงเวลากด
     try:
         for k, at in enumerate(times):
             due = t0 + at / 1000
-            while time.perf_counter() < due - TIMED_LEAD:
+            while True:
+                t_it = time.perf_counter()
+                lead = max(TIMED_LEAD, 2.5 * iter_ms / 1000 + 0.002)      # ลีด = พอสำหรับเช็กสด 1 รอบ (ถ้าลูปช้า/อัดวิดีโอ ลีดยาวขึ้นเอง)
+                if t_it >= due - lead:
+                    break
                 if esc_pressed():
                     raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
                 if not alive(grab()):
                     log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนถึงเวลากด -> ไม่คลิก")
                     return done
+                iter_ms = 0.8 * iter_ms + 0.2 * (time.perf_counter() - t_it) * 1000
             if _header_score(grab(), scale) < HEADER_MATCH:               # เช็กสดก่อนกดทุกครั้ง
                 log.info(f"  {ms():7.0f}ms  ไม่เห็นหัวข้อก่อนกด -> ไม่คลิก")
                 return done
@@ -323,6 +329,12 @@ def run_assist(argv):
     dry_run = "--dry" in argv
     once = "--once" in argv
     record = "--record" in argv
+    first_list = None                               # --first a,b,c = ทดสอบเวลาคลิกแรก (สลับสุ่มทีละรอบ)
+    if "--first" in argv:
+        i = argv.index("--first")
+        first_list = [float(x) for x in argv[i + 1].split(",")]
+        argv = argv[:i] + argv[i + 2:]
+        record = True
     second, deltas = None, None                     # --second a,b,c = เวลาคลิกที่ 2 (ms จากหัวข้อ)  --after a,b,c = ห่างจากคลิกแรก (ms)
     if "--after" in argv:
         i = argv.index("--after")
@@ -351,6 +363,7 @@ def run_assist(argv):
     if second:
         clicks = 2
     sweep, order = {s: [] for s in (second or [])}, []
+    sweep1, order1 = {s: [] for s in (first_list or [])}, []
     screen = Screen()
     tuned = tune_realtime()
     log.info("#" * 60)
@@ -361,12 +374,26 @@ def run_assist(argv):
     while True:
         try:
             times = fixed
+            cand1 = None
+            if first_list:
+                if not order1:
+                    order1 = random.sample(first_list, len(first_list))
+                cand1 = order1.pop()
+                times = [cand1] + ([cand1 + d for d in deltas] if deltas else [])
             if second:
                 if not order:
                     order = random.sample(second, len(second))
                 cand = order.pop()
-                times = [at_ms, cand]
+                first_t = cand1 if cand1 is not None else at_ms
+                times = [first_t, first_t + (cand - at_ms)] if deltas else [first_t, cand]
             n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1, times)
+            if first_list:
+                v1 = getattr(assist_round, 'verdicts', [])
+                got1 = [ok for k, _, ok, _ in v1 if k == 1]
+                if got1:
+                    sweep1[cand1].append(bool(got1[0]))
+                log.info('[assist] สรุปสะสมคลิกแรก: ' + '  '.join(
+                    f'{c:.0f}ms={sum(r)}/{len(r)}' for c, r in sorted(sweep1.items()) if r) + '   (เก็บได้/ทั้งหมด)')
             if second:
                 v = getattr(assist_round, 'verdicts', [])
                 got2 = [ok for k, _, ok, _ in v if k == 2]
