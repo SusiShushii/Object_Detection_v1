@@ -17,7 +17,7 @@ import traceback
 import config
 
 from . import clicker as ck
-from .clicker import (LOCATE_EVERY, locate_header, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, ClickAborted, _header_score,
+from .clicker import (BG_READY_V, GET_MATCH, LOCATE_EVERY, _get_score, _slot_bg_v, locate_header, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, ClickAborted, _header_score,
                       _hover_point, _is_empty_slot, _loot_log, _loot_state, esc_pressed, move_to, real_move,
                       tune_realtime)
 from .detection import get_scale, log
@@ -336,6 +336,8 @@ def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1,
 
 
 def run_assist(argv):
+    if "--react" in argv:
+        return run_react(argv)
     dry_run = "--dry" in argv
     once = "--once" in argv
     record = "--record" in argv
@@ -425,6 +427,172 @@ def run_assist(argv):
         except Exception:
             errors += 1
             log.info(f"[assist] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {config.ERROR_RETRY_DELAY:.0f} วินาที\n"
+                     + traceback.format_exc())
+            try:
+                time.sleep(config.ERROR_RETRY_DELAY)
+                screen = Screen()
+            except KeyboardInterrupt:
+                break
+
+
+# ---------------------------------------------------------------------------
+# โหมดตามสี (python main.py assist --react): คุณคุมเมาส์ บอทกดทันทีที่ช่องใต้เมาส์พร้อมเก็บ
+# ---------------------------------------------------------------------------
+
+def react_round(screen, dry_run=False, record=False, round_no=1):
+    """1 รอบ: รอหัวข้อ Mission Reward -> เฝ้าช่องใต้เมาส์ (เมาส์คุณเอง ไม่ขยับ)
+    กดทันทีเมื่อ  พื้นหลังช่องเปลี่ยนจากทึบเป็นสีปกติ  หรือ  เห็นป้าย GET!  (OR)
+    กดครั้งแรกแล้ว กดซ้ำกันพลาดอีกครั้งหลัง REACT_BACKUP_MS  แล้วเฝ้าช่องเดิมรอชิ้นถัดไปต่อ
+    จนกว่า Mission Reward จะหายไป (บันทึกวิดีโอ/log ต่อจนหัวข้อหายด้วย)  คืนจำนวนคลิก"""
+    scale = get_scale(screen)
+    box = screen.get_region("mission_reward")
+    rects = slot_rects(scale)
+    down, up = ck.MOUSE_FLAGS["left"]
+
+    last_locate = 0.0
+    while True:                                                   # รอหัวข้อ (ทุกเฟรม) + บันทึกภาพ loot
+        if esc_pressed():
+            raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+        img = screen.grab(box)
+        _loot_log(img, scale)
+        if _header_score(img, scale) >= HEADER_MATCH:
+            break
+        if time.perf_counter() - last_locate >= LOCATE_EVERY:           # หัวข้อไม่อยู่ในกรอบ: ลองหาในพื้นที่กว้างขึ้น
+            last_locate = time.perf_counter()
+            if locate_header(screen, scale):
+                box = screen.get_region("mission_reward")
+        time.sleep(0.002)
+    t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000
+    react_round.verdicts = []
+    backup = config.REACT_BACKUP_MS
+    log.info("=" * 60)
+    log.info("[react] เห็น Mission Reward  เฝ้าช่องใต้เมาส์: กดทันทีเมื่อ (ทึบ→พร้อม) หรือ (เห็น GET!)"
+             + (f"  +กดซ้ำ {backup:.0f}ms" if backup else "") + f"  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้)"
+             + ("  [dry_run]" if dry_run else "") + ("  [บันทึกวิดีโอ]" if record else ""))
+
+    from .recorder import RoundRecorder
+    rec = RoundRecorder(scale, box, rects, t0, round_no) if record else None
+
+    def slot_at(cur):
+        x, y = cur[0] - box[0], cur[1] - box[1]
+        for i, (sx, sy, sw, sh, _) in enumerate(rects):
+            if sx <= x <= sx + sw and sy <= y <= sy + sh:
+                return i
+        return None
+
+    def click_now(label, grp, reason):
+        """ส่งคลิก ณ ตอนนี้ (ตรงที่เมาส์อยู่)  คืนเวลา ms"""
+        nonlocal done
+        t = ms()
+        if not dry_run:
+            ck._send_mouse(down)
+            time.sleep(random.uniform(*ck.CLICK_HOLD))
+            ck._send_mouse(up)
+        done += 1
+        if rec is not None:
+            rec.mark_click(done, t, grp)
+        x, y = ck.get_cursor()
+        log.info(f"  {t:7.1f}ms  กด {label} (คลิกที่ {done}) {reason}  screen=({x}, {y})")
+        return t
+
+    done, groups = 0, 0
+    cur_idx = None
+    armed, was_dim = True, False
+    ready_since = None                    # เฟรมแรกที่ช่องนี้พร้อม (ไว้วัดว่ากดช้ากว่าช่องพร้อมกี่ ms)
+    fired_at, retries = None, 0
+    backup_due = None
+    last_empty_chk, last_empty = 0.0, False
+    miss, last_hdr = 0, 0.0
+    try:
+        while True:
+            if esc_pressed():
+                raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+            img = screen.grab(box)
+            now = time.perf_counter()
+            cur = ck.get_cursor()
+            if rec is not None:
+                rec.add(img, cur)
+            _loot_log(img, scale)
+            if now - last_hdr >= HDR_EVERY:
+                last_hdr = now
+                miss = 0 if _header_score(img, scale) >= HEADER_MATCH else miss + 1
+                if miss >= ck.HEADER_LOST_FRAMES:
+                    log.info(f"  {ms():7.1f}ms  Mission Reward หายไปแล้ว -> จบรอบ (กดไป {done} ครั้ง {groups} ชิ้น)")
+                    return done
+            if backup_due is not None and now >= backup_due:            # คลิกกันพลาดของชิ้นล่าสุด
+                backup_due = None
+                click_now("กันพลาด", groups, "")
+            idx = slot_at(cur)
+            if idx != cur_idx:                                           # ย้ายเมาส์ไปช่องอื่น: เริ่มเฝ้าช่องใหม่
+                cur_idx, armed, was_dim, ready_since, fired_at, retries = idx, True, False, None, None, 0
+            if idx is None:
+                continue
+            item = rects[idx]
+            v = _slot_bg_v(img, item)
+            if v < BG_READY_V:                                           # ช่องทึบ
+                was_dim, ready_since = True, None
+                if not armed and fired_at is not None and now - fired_at > 0.3:
+                    armed, fired_at, retries = True, None, 0             # ทึบหลังกด (ชิ้นถัดไปเลื่อนเข้ามา) -> พร้อมเฝ้าใหม่
+                continue
+            if ready_since is None:
+                ready_since = now
+            if not armed:                                                # กดไปแล้ว: รอให้ช่องว่างก่อนถึงจะเฝ้าชิ้นใหม่
+                if now - last_empty_chk >= 0.04:
+                    last_empty_chk = now
+                    last_empty = _is_empty_slot(img, item[0], item[1], item[2], item[3], scale)
+                if last_empty:
+                    armed, was_dim, ready_since, fired_at, retries = True, False, None, None, 0
+                elif (fired_at is not None and now - fired_at >= config.REACT_RETRY_MS / 1000 and retries < 2
+                      and _get_score(img, ("x", item), scale) >= GET_MATCH):
+                    armed, retries = True, retries + 1                   # กดแล้วช่องยังพร้อมค้าง (มีป้าย GET!) = ไม่ติด -> กดใหม่
+                    log.info(f"  {ms():7.1f}ms  ช่อง {idx + 1} ยังพร้อมค้างหลังกด {config.REACT_RETRY_MS:.0f}ms -> กดใหม่")
+                continue
+            # armed + ช่องพร้อม: ตัดสินว่ากดไหม  (GET! หรือ ทึบ→พร้อม)
+            reason = None
+            if _get_score(img, ("x", item), scale) >= GET_MATCH:
+                reason = "เห็นป้าย GET!"
+            elif was_dim and not _is_empty_slot(img, item[0], item[1], item[2], item[3], scale):
+                reason = "ทึบ→พร้อม"
+            if reason is None:
+                continue
+            lat = (time.perf_counter() - ready_since) * 1000
+            groups += 1
+            click_now(f"ชิ้นที่ {groups}", groups, f"[{reason}] ช่อง {idx + 1} V={v:.0f} (ช่องพร้อมมาแล้ว {lat:.1f}ms)")
+            armed, fired_at = False, time.perf_counter()
+            if backup:
+                backup_due = fired_at + backup / 1000
+    finally:
+        if rec is not None:
+            rec.finish(log)
+            react_round.verdicts = rec.verdicts
+
+
+def run_react(argv):
+    dry_run = "--dry" in argv
+    record = "--record" in argv
+    screen = Screen()
+    tuned = tune_realtime()
+    log.info("#" * 60)
+    log.info(f"[react] เริ่มทำงาน (คุณคุมเมาส์ บอทกดตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
+             f"กดซ้ำ {config.REACT_BACKUP_MS}ms  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
+    rounds, total, errors = 0, 0, 0
+    while True:
+        try:
+            n = react_round(screen, dry_run, record, rounds + 1)
+            rounds += 1
+            total += n
+            log.info(f"[react] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
+            wait_closed(screen)
+        except ClickAborted as e:
+            log.info(f"[react] หยุดทำงาน ({e})  {rounds} รอบ  คลิกรวม {total}  error {errors} ครั้ง")
+            break
+        except KeyboardInterrupt:
+            log.info(f"[react] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total}  error {errors} ครั้ง")
+            break
+        except Exception:
+            errors += 1
+            log.info(f"[react] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {config.ERROR_RETRY_DELAY:.0f} วินาที\n"
                      + traceback.format_exc())
             try:
                 time.sleep(config.ERROR_RETRY_DELAY)
