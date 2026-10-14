@@ -233,9 +233,10 @@ def run_collect(argv):
 # โหมดช่วยกด (python main.py assist)  คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ
 # ---------------------------------------------------------------------------
 
-def assist_round(screen, at_ms, clicks, dry_run=False):
+def assist_round(screen, at_ms, clicks, dry_run=False, record=False, round_no=1):
     """1 รอบ: รอหัวข้อ Mission Reward -> ที่ at_ms กดคลิกตรงที่เมาส์อยู่ (ไม่ขยับเมาส์ ไม่เลือกช่อง)
-    clicks > 1 = กดซ้ำทุก config.RETRY_AFTER_MS  คืนจำนวนคลิก"""
+    clicks > 1 = กดซ้ำทุก config.RETRY_AFTER_MS  record = บันทึกวิดีโอ + วิเคราะห์ timeline (RoundRecorder)
+    คืนจำนวนคลิก"""
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
     down, up = ck.MOUSE_FLAGS["left"]
@@ -253,7 +254,17 @@ def assist_round(screen, at_ms, clicks, dry_run=False):
     times = [at_ms + k * config.RETRY_AFTER_MS for k in range(clicks)]
     log.info("=" * 60)
     log.info(f"[assist] เห็น Mission Reward  จะกดที่ " + ", ".join(f"{t:.0f}" for t in times)
-             + f" ms  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้){'  [dry_run]' if dry_run else ''}")
+             + f" ms  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้){'  [dry_run]' if dry_run else ''}"
+             + ("  [บันทึกวิดีโอ]" if record else ""))
+
+    from .recorder import RoundRecorder
+    rec = RoundRecorder(scale, box, slot_rects(scale), t0, round_no) if record else None
+
+    def grab():
+        frame = screen.grab(box)
+        if rec is not None:
+            rec.add(frame, ck.get_cursor())
+        return frame
 
     state = {"miss": 0, "last_hdr": 0.0}
 
@@ -266,36 +277,50 @@ def assist_round(screen, at_ms, clicks, dry_run=False):
         return state["miss"] < ck.HEADER_LOST_FRAMES
 
     done = 0
-    for k, at in enumerate(times):
-        due = t0 + at / 1000
-        while time.perf_counter() < due - TIMED_LEAD:
-            if esc_pressed():
-                raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
-            if not alive(screen.grab(box)):
-                log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนถึงเวลากด -> ไม่คลิก")
+    try:
+        for k, at in enumerate(times):
+            due = t0 + at / 1000
+            while time.perf_counter() < due - TIMED_LEAD:
+                if esc_pressed():
+                    raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+                if not alive(grab()):
+                    log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนถึงเวลากด -> ไม่คลิก")
+                    return done
+            if _header_score(grab(), scale) < HEADER_MATCH:               # เช็กสดก่อนกดทุกครั้ง
+                log.info(f"  {ms():7.0f}ms  ไม่เห็นหัวข้อก่อนกด -> ไม่คลิก")
                 return done
-        if _header_score(screen.grab(box), scale) < HEADER_MATCH:     # เช็กสดก่อนกดทุกครั้ง
-            log.info(f"  {ms():7.0f}ms  ไม่เห็นหัวข้อก่อนกด -> ไม่คลิก")
-            return done
-        x, y = ck.get_cursor()
-        if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):      # กันคลิกนอกกรอบรางวัลโดยไม่ตั้งใจ
-            log.info(f"  {ms():7.0f}ms  เมาส์อยู่นอกกรอบรางวัล ({x}, {y}) -> ไม่คลิก (วางเมาส์บนช่องที่ต้องการก่อน)")
-            return done
-        while time.perf_counter() < due:
-            time.sleep(0)
-        t = ms()
-        if not dry_run:
-            ck._send_mouse(down)
-            time.sleep(random.uniform(*ck.CLICK_HOLD))
-            ck._send_mouse(up)
-        done += 1
-        log.info(f"  {t:7.0f}ms  กดครั้งที่ {k + 1} ตรงที่เมาส์อยู่ screen=({x}, {y})  (ตั้งไว้ {at:.0f}ms)")
-    return done
+            x, y = ck.get_cursor()
+            if not (box[0] <= x <= box[2] and box[1] <= y <= box[3]):      # กันคลิกนอกกรอบรางวัลโดยไม่ตั้งใจ
+                log.info(f"  {ms():7.0f}ms  เมาส์อยู่นอกกรอบรางวัล ({x}, {y}) -> ไม่คลิก (วางเมาส์บนช่องที่ต้องการก่อน)")
+                return done
+            while time.perf_counter() < due:
+                time.sleep(0)
+            t = ms()
+            if not dry_run:
+                ck._send_mouse(down)
+                time.sleep(random.uniform(*ck.CLICK_HOLD))
+                ck._send_mouse(up)
+            done += 1
+            if rec is not None:
+                rec.mark_click(k + 1, t)
+            log.info(f"  {t:7.0f}ms  กดครั้งที่ {k + 1} ตรงที่เมาส์อยู่ screen=({x}, {y})  (ตั้งไว้ {at:.0f}ms)")
+        if rec is not None:                                              # หลังคลิกครั้งสุดท้าย บันทึกต่ออีก ~0.8 วินาที (ดูช่องทึบแว้บ/ว่าง)
+            end = time.perf_counter() + 0.8
+            while time.perf_counter() < end:
+                if esc_pressed():
+                    raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+                if not alive(grab()):
+                    break
+        return done
+    finally:
+        if rec is not None:
+            rec.finish(log)
 
 
 def run_assist(argv):
     dry_run = "--dry" in argv
     once = "--once" in argv
+    record = "--record" in argv
     nums = [a for a in argv if not a.startswith("--")]
     at_ms = float(nums[0]) if nums else config.CLICK_AT_MS
     if at_ms is None:
@@ -311,7 +336,7 @@ def run_assist(argv):
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = assist_round(screen, at_ms, clicks, dry_run)
+            n = assist_round(screen, at_ms, clicks, dry_run, record, rounds + 1)
             rounds += 1
             total += n
             log.info(f"[assist] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
