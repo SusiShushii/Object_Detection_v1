@@ -106,7 +106,16 @@ def main():
     # ภาพย่อ ครอปเฉพาะบริเวณหน้าต่างให้ดูง่าย
     cx0, cy0 = max(0, box0[0] - left - 300), max(0, box0[1] - top - 400)
     cx1, cy1 = min(w, box0[2] - left + 300), min(h, box0[3] - top + 250)
-    cv2.imwrite(os.path.join(paths.DEBUG, "region_check_crop.png"), out[cy0:cy1, cx0:cx1])
+    crop = out[cy0:cy1, cx0:cx1].copy()
+    legend = [((255, 0, 0), f"BLUE  = start region (REGION_OFFSET {screen._default_offset()})"),
+              ((0, 220, 255), f"YELLOW = search area (LOCATE_SEARCH +-{ck.LOCATE_SEARCH[0]} x, +-{ck.LOCATE_SEARCH[1]} y @2K)"),
+              ((0, 220, 0), "GREEN = region the bot captures (thin = 21 slots)"),
+              ((0, 0, 255), "RED = Mission Reward header found"),
+              ((255, 200, 0), "CYAN = +40px safety margin")]
+    cv2.rectangle(crop, (0, 0), (min(crop.shape[1], 560), 24 * len(legend) + 8), (255, 255, 255), -1)
+    for i, (col, txt) in enumerate(legend):
+        cv2.putText(crop, txt, (6, 22 + 24 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 2 if col != (0, 220, 255) else 2)
+    cv2.imwrite(os.path.join(paths.DEBUG, "region_check_crop.png"), crop)
     print(f"บันทึก {os.path.relpath(full, paths.ROOT)} (ทั้งจอ) และ region_check_crop.png (เฉพาะบริเวณหน้าต่าง)")
     print("สรุป: " + ("ตรงตำแหน่งเดิม ใช้ได้" if s0 >= ck.HEADER_MATCH else
                       ("หน้าต่างเลื่อน แต่บอทหาเจอและปรับกรอบให้เองแล้ว (ใช้ได้)" if s1 >= ck.HEADER_MATCH
