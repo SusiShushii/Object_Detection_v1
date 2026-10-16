@@ -77,7 +77,17 @@ class Screen:
         self.window_title = window_title
         self.monitor = monitor
         self.sct = mss.MSS()
-        self.region_offset = (0, 0)          # หน้าต่างรางวัลเลื่อนจากตำแหน่งปกติ (dx, dy) px: ตั้งโดย locate_header อัตโนมัติ
+        self.region_offset = self._default_offset()   # หน้าต่างรางวัลเลื่อนจากตำแหน่งปกติ (dx, dy) px: เริ่มจาก config.REGION_OFFSET แล้ว locate_header ปรับให้เองถ้าเลื่อน
+
+    def _default_offset(self):
+        """ค่าเริ่มต้นของออฟเซ็ตกรอบ จาก config.REGION_OFFSET (กำหนดที่จอ 2K = 1440 สูง) ปรับตามความสูงจอจริง"""
+        try:
+            import config
+            dx, dy = config.REGION_OFFSET
+            sc = self.get_screen_rect()[3] / 1440
+            return round(dx * sc), round(dy * sc)
+        except Exception:
+            return (0, 0)
 
     # ---- พื้นที่ ----------------------------------------------------------
 

@@ -31,8 +31,9 @@ class ImageScreen(Screen):
     """ใช้ภาพแคปทั้งจอแทนจอจริง (ปรับเป็นสัดส่วน 16:9 ตามความกว้างภาพ)"""
 
     def __init__(self, img):
-        self.window_title, self.monitor, self.region_offset = None, 1, (0, 0)
+        self.window_title, self.monitor = None, 1
         self.img = img
+        self.region_offset = self._default_offset()
 
     def get_screen_rect(self):
         h, w = self.img.shape[:2]

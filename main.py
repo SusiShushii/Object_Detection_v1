@@ -6,6 +6,7 @@ main.py - จุดเริ่มต้นเดียวของโปรแ�
     python main.py assist [3980]         คุณคุมเมาส์เอง บอทกดคลิกให้ตรงจังหวะ
     python main.py collect               เก็บทุกช่องตามเวลา ไม่ detect ไอเท็ม + บันทึก loot
     python main.py carrot                เหมือน run carrot (พิมพ์ชื่อไอเท็มตรงๆ ได้ เหมือนเดิม)
+    python main.py wgc --check [--record] เช็ก WGC อ่านภาพจาก process เกมได้ไหม + fps จริง + record ค้างไว้
     python main.py region [shot.png]     เช็กกรอบจับภาพตรงหน้า Mission Reward ไหม + วาดกรอบ
     python main.py prepare [--apply]     เตรียมรูปไอเท็มที่ครอปเอง  data/inbox -> assets/templates
     python main.py crop                  ครอปรูปไอเท็มจาก output/loot
@@ -44,6 +45,8 @@ COMMANDS = {
                "เวลา(ms) เช่น  3980   (เว้นว่าง = ค่าใน config.py)   --once = กดครั้งเดียว   --react = กดตามสีช่อง/GET! (เมาส์คุณเอง)   --record = บันทึกวิดีโอ+วิเคราะห์   --first 3995,4000,4005 = ทดสอบเวลาคลิกแรก   --second 4990,5000 = ทดสอบเวลาคลิกที่ 2 (นับจากหัวข้อ)   --after 1002,1012 = ทดสอบคลิกที่ 2 ห่างจากคลิกแรก (ms)   --dry"),
     "region": ("เช็กว่ากรอบจับภาพตรงหน้า Mission Reward ไหม + วาดกรอบให้ดู (ไม่คลิก)", "tools.check_region",
                "เว้นว่าง = จับจอตอนนี้ (เปิดหน้า Mission Result ไว้)   หรือใส่ไฟล์ภาพแคปจอ เช่น  shot.png"),
+    "wgc": ("เช็กว่า WGC อ่านภาพจาก process เกมได้ไหม + วัด fps จริง + record ค้างไว้ (ไม่คลิก)", "tools.wgc_check",
+            "--check   (+ --record = วิดีโอกรอบบอท  --full = ทั้งหน้าต่างเกม  --seconds 30 = เช็กแค่ 30 วิ)"),
     "prepare": ("เตรียมรูปไอเท็มที่ครอปเอง (จอ 2K/1080p ปนกัน) ใส่ data/inbox แล้วตรวจ+ปรับเป็น 62x65", "tools.prepare_templates",
                 "เว้นว่าง = ตรวจรูปใน data/inbox   --apply = บันทึกลง assets/templates   --src 1080 / --force"),
     "crop": ("ครอปรูปไอเท็มอัตโนมัติจากภาพที่บอทบันทึก (output/loot)", "tools.crop_templates",
