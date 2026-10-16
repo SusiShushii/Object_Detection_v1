@@ -64,6 +64,11 @@ def find_window_rect(title):
 # ---------------------------------------------------------------------------
 
 class Screen:
+    backend = "mss"
+
+    def close(self):
+        pass
+
     def __init__(self, window_title=None, monitor=1):
         """
         window_title : ชื่อหน้าต่างเกม (โหมด windowed) ถ้า None จะใช้ทั้งจอ

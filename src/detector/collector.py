@@ -21,7 +21,7 @@ from .clicker import (BG_READY_V, GET_MATCH, LOCATE_EVERY, _get_score, _slot_bg_
                       _hover_point, _is_empty_slot, _loot_log, _loot_state, esc_pressed, move_to, real_move,
                       tune_realtime)
 from .detection import get_scale, log
-from .screen import Screen
+from .wgc import make_screen
 
 TIMED_LEAD = ck.TIMED_LEAD
 STABLE_FOR = 0.15          # จำนวนช่องที่มีของต้องนิ่งนานเท่านี้ (วินาที) ถึงถือว่าไอเท็มขึ้นครบ
@@ -203,7 +203,7 @@ def run_collect(argv):
     if config.CLICK_AT_MS is None:
         print("โหมดนี้ต้องใช้เวลากด: ตั้ง CLICK_AT_MS ใน config.py (เช่น 3988) ก่อน")
         return
-    screen = Screen()
+    screen = make_screen()
     tuned = tune_realtime()
     w, h = screen.get_screen_rect()[2:4]
     log.info("#" * 60)
@@ -229,7 +229,8 @@ def run_collect(argv):
                      + traceback.format_exc())
             try:
                 time.sleep(config.ERROR_RETRY_DELAY)
-                screen = Screen()
+                screen.close()
+                screen = make_screen()
             except KeyboardInterrupt:
                 break
 
@@ -376,7 +377,7 @@ def run_assist(argv):
         clicks = 2
     sweep, order = {s: [] for s in (second or [])}, []
     sweep1, order1 = {s: [] for s in (first_list or [])}, []
-    screen = Screen()
+    screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
     log.info(f"[assist] เริ่มทำงาน (คุณคุมเมาส์ บอทกดให้ตรงจังหวะ)  dry_run={dry_run}  กดที่ {at_ms:.0f}ms  "
@@ -430,7 +431,8 @@ def run_assist(argv):
                      + traceback.format_exc())
             try:
                 time.sleep(config.ERROR_RETRY_DELAY)
-                screen = Screen()
+                screen.close()
+                screen = make_screen()
             except KeyboardInterrupt:
                 break
 
@@ -481,10 +483,11 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
                 return i
         return None
 
-    def click_now(label, grp, reason):
-        """ส่งคลิก ณ ตอนนี้ (ตรงที่เมาส์อยู่)  คืนเวลา ms"""
+    def send_click(grp):
+        """ส่งคลิก ณ ตอนนี้ (ตรงที่เมาส์อยู่) ไม่ log (log ช้า) คืน (เวลา ms จากหัวข้อ, perf_counter ตอนส่ง)"""
         nonlocal done
-        t = ms()
+        tp = time.perf_counter()
+        t = (tp - t0) * 1000
         if not dry_run:
             ck._send_mouse(down)
             time.sleep(random.uniform(*ck.CLICK_HOLD))
@@ -492,16 +495,17 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
         done += 1
         if rec is not None:
             rec.mark_click(done, t, grp)
+        return t, tp
+
+    def log_click(label, t, n_click, reason):
         x, y = ck.get_cursor()
-        log.info(f"  {t:7.1f}ms  กด {label} (คลิกที่ {done}) {reason}  screen=({x}, {y})")
-        return t
+        log.info(f"  {t:7.1f}ms  กด {label} (คลิกที่ {n_click}) {reason}  screen=({x}, {y})")
 
     done, groups = 0, 0
     cur_idx = None
     armed, was_dim = True, False
     ready_since = None                    # เฟรมแรกที่ช่องนี้พร้อม (ไว้วัดว่ากดช้ากว่าช่องพร้อมกี่ ms)
     fired_at, retries = None, 0
-    backup_due = None
     last_empty_chk, last_empty = 0.0, False
     miss, last_hdr = 0, 0.0
     try:
@@ -520,9 +524,6 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
                 if miss >= ck.HEADER_LOST_FRAMES:
                     log.info(f"  {ms():7.1f}ms  Mission Reward หายไปแล้ว -> จบรอบ (กดไป {done} ครั้ง {groups} ชิ้น)")
                     return done
-            if backup_due is not None and now >= backup_due:            # คลิกกันพลาดของชิ้นล่าสุด
-                backup_due = None
-                click_now("กันพลาด", groups, "")
             idx = slot_at(cur)
             if idx != cur_idx:                                           # ย้ายเมาส์ไปช่องอื่น: เริ่มเฝ้าช่องใหม่
                 cur_idx, armed, was_dim, ready_since, fired_at, retries = idx, True, False, None, None, 0
@@ -558,10 +559,18 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
                 continue
             lat = (time.perf_counter() - ready_since) * 1000
             groups += 1
-            click_now(f"ชิ้นที่ {groups}", groups, f"[{reason}] ช่อง {idx + 1} V={v:.0f} (ช่องพร้อมมาแล้ว {lat:.1f}ms)")
-            armed, fired_at = False, time.perf_counter()
-            if backup:
-                backup_due = fired_at + backup / 1000
+            t1, tp1 = send_click(groups)
+            n1 = done
+            armed, fired_at = False, tp1
+            t2 = None
+            if backup:                                                   # กดซ้ำกันพลาดให้ตรงเวลา (spin ไม่รอรอบลูปถัดไป ไม่ log คั่นกลาง)
+                due_b = tp1 + backup / 1000
+                while time.perf_counter() < due_b:
+                    time.sleep(0)
+                t2, _ = send_click(groups)
+            log_click(f"ชิ้นที่ {groups}", t1, n1, f"[{reason}] ช่อง {idx + 1} V={v:.0f} (ช่องพร้อมมาแล้ว {lat:.1f}ms)")
+            if t2 is not None:
+                log_click("กันพลาด", t2, done, f"(ห่างคลิกแรก {t2 - t1:.1f}ms)")
     finally:
         if rec is not None:
             rec.finish(log)
@@ -571,7 +580,7 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
 def run_react(argv):
     dry_run = "--dry" in argv
     record = "--record" in argv
-    screen = Screen()
+    screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
     log.info(f"[react] เริ่มทำงาน (คุณคุมเมาส์ บอทกดตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
@@ -596,6 +605,7 @@ def run_react(argv):
                      + traceback.format_exc())
             try:
                 time.sleep(config.ERROR_RETRY_DELAY)
-                screen = Screen()
+                screen.close()
+                screen = make_screen()
             except KeyboardInterrupt:
                 break

@@ -15,7 +15,7 @@ import config
 from .clicker import STOP_KEY_NAME, ClickAborted, tune_realtime, wait_and_click, wait_gone
 from .detection import log
 from .profiles import list_profiles, resolve
-from .screen import Screen
+from .wgc import make_screen
 
 
 def run(argv):
@@ -37,7 +37,7 @@ def run(argv):
         print("-> เก็บเฉพาะที่หารูปเจอต่อไป")
     targets = info["names"] or None          # None = ทุกไอเท็มใน assets/templates/
 
-    screen = Screen()
+    screen = make_screen()
     tuned = tune_realtime()
     rounds, total_clicked, errors = 0, 0, 0
 
@@ -73,7 +73,8 @@ def run(argv):
                      + traceback.format_exc())
             try:
                 time.sleep(config.ERROR_RETRY_DELAY)
-                screen = Screen()            # สร้างตัวจับภาพจอใหม่ (เผื่อ error มาจากจอ)
+                screen.close()
+                screen = make_screen()            # สร้างตัวจับภาพจอใหม่ (เผื่อ error มาจากจอ)
             except KeyboardInterrupt:
                 log.info(f"[main] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total_clicked}  error {errors} ครั้ง")
                 break
