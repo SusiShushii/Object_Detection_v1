@@ -96,6 +96,7 @@ python main.py assist --first 3992,3996,4000,4004,4008 --record
 python main.py assist --react            # เฝ้าช่องใต้เมาส์ กดทันทีที่พร้อม
 python main.py assist --react --record   # + วิดีโอ/trace/timeline ต่อเนื่องจนกว่า Mission Reward จะหาย
 python main.py assist --react --dry      # ไม่คลิกจริง
+python main.py assist --react --record --capture mss   # เลือกวิธีจับภาพเฉพาะรอบนี้: wgc (ตามเกม) หรือ mss (จับจอ) — หรือ --wgc / --mss (ใช้กับ run/assist/collect; ไม่ใส่ = ตาม config.CAPTURE_BACKEND)
 ```
 
 - **พร้อม = (พื้นหลังช่องเปลี่ยนจากทึบเป็นสีปกติ) หรือ (เห็นป้าย GET!)** แบบ OR ช่องว่างไม่นับ (ตรวจแยกให้) ไม่ต้องรู้เวลาล่วงหน้า

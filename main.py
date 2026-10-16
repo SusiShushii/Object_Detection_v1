@@ -15,6 +15,8 @@ main.py - จุดเริ่มต้นเดียวของโปรแ�
     python main.py analyze               สรุปสถิติจาก timing.log
     python main.py clickat 3988 --slot 1 ทดสอบกดที่เวลา X ms
     python main.py fps                   วัดรอบอัปเดตจอ / ความเร็วจับภาพ
+    ตัวเลือกวิธีจับภาพ (ใช้กับ run / assist / collect):  --capture wgc | --capture mss   (หรือ --wgc / --mss)
+                                  เช่น python main.py assist --react --record --capture mss
     python main.py <คำสั่ง> --help        วิธีใช้ของแต่ละคำสั่ง   (python main.py help = รายการนี้)
 
 ตั้งค่าจังหวะกด / ปุ่มหยุด ที่ config.py   ผลลัพธ์ทั้งหมดอยู่ที่ output/ (log ที่ output/logs/)
@@ -63,8 +65,33 @@ COMMANDS = {
 }
 
 
+def pop_capture(rest):
+    """แยกตัวเลือกวิธีจับภาพออกจากอาร์กิวเมนต์: --capture wgc|mss  หรือ  --wgc / --mss  คืน (อาร์กิวเมนต์ที่เหลือ, วิธีที่เลือก หรือ None)"""
+    out, backend, i = [], None, 0
+    while i < len(rest):
+        a = rest[i]
+        if a in ("--capture", "--backend") and i + 1 < len(rest):
+            backend, i = rest[i + 1].lower(), i + 2
+        elif a.startswith(("--capture=", "--backend=")):
+            backend, i = a.split("=", 1)[1].lower(), i + 1
+        elif a in ("--wgc", "--mss"):
+            backend, i = a[2:], i + 1
+        else:
+            out.append(a)
+            i += 1
+    return out, backend
+
+
 def run_command(cmd, rest):
     desc, module, _ = COMMANDS[cmd]
+    rest, backend = pop_capture(rest)
+    if backend is not None:
+        if backend not in ("wgc", "mss"):
+            print(f"--capture ต้องเป็น wgc หรือ mss (ได้ '{backend}')")
+            return
+        import config
+        config.CAPTURE_BACKEND = backend            # ใช้เฉพาะรอบนี้ ไม่แก้ไฟล์ config.py
+        print(f"[main] วิธีจับภาพรอบนี้: {backend}")
     if cmd == "assist":
         if "--help" in rest or "-h" in rest:
             print(COMMANDS["assist"][2])
