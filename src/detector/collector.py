@@ -73,8 +73,10 @@ def _summarize_clicks(screen, click_info, verdicts, cap0):
         log.info(f"[สรุปรอบ]   คลิกที่ {n}: {t:7.1f}ms  วิธี={method}  ช่อง {slot + 1 if slot is not None else '-'}{res}")
 
 
-def assist_round(screen, dry_run=False, record=False, round_no=1):
-    """1 รอบ: รอหัวข้อ Mission Reward แล้วทำ 2 อย่างพร้อมกัน (เมาส์เป็นของคุณ บอทไม่ขยับ)
+def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
+    """1 รอบ: รอหัวข้อ Mission Reward แล้วทำ 2 อย่างพร้อมกัน (ไม่ระบุ names = เมาส์เป็นของคุณ บอทไม่ขยับ)
+    names = ชื่อไอเท็มที่ต้องการ (assist carrot): บอท detect แล้ว"ลากเมาส์ไปครอบไอเท็ม"ให้ (ตามลำดับความสำคัญ)
+            เก็บชิ้นหนึ่งว่างแล้วย้ายไปชิ้นถัดไป  การกดยังเป็น 2 อย่างเดิม (ตามเวลา + ตามสี)
       1) กดตั้งเวลา: ที่ ASSIST_CLICK_AT_MS (ms จากหัวข้อ) กด 1 ครั้งตรงที่เมาส์อยู่  (None = ปิด)
       2) กดตามสี: เฝ้าช่องใต้เมาส์ กดเมื่อพื้นหลังช่องเปลี่ยน ทึบ->พร้อม หรือเห็นป้าย GET!  (ย้ายเมาส์ไปช่องอื่น = เฝ้าช่องใหม่)
     ไม่มีคลิกสำรอง/กดใหม่  ทำต่อจนกว่า Mission Reward จะหายไป  คืนจำนวนคลิก"""
@@ -82,6 +84,10 @@ def assist_round(screen, dry_run=False, record=False, round_no=1):
     box = screen.get_region("mission_reward")
     rects = slot_rects(scale)
     down, up = ck.MOUSE_FLAGS["left"]
+    tnames = ck._resolve_names(names) if names else None
+    priority = list(dict.fromkeys(names)) if names else []
+    rank = lambda t: (priority.index(item_name(t[0])) if item_name(t[0]) in priority else len(priority), t[1][1], t[1][0])
+    queue, tgt, pending, last_detect = [], {"item": None, "clicked": False, "t": 0.0, "chk": 0.0}, bool(tnames), 0.0
 
     last_locate = 0.0
     while True:                                                   # รอหัวข้อ (ทุกเฟรม) + บันทึกภาพ loot
@@ -106,7 +112,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1):
     log.info("[assist] เห็น Mission Reward  " + (f"กดตั้งเวลาที่ {timed_ms:g}ms + " if timed_ms is not None else "")
              + "เฝ้าช่องใต้เมาส์: กดทันทีเมื่อ (ทึบ→พร้อม) หรือ (เห็น GET!)"
              + f"  จับภาพ={screen.backend}"
-             + f"  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้)"
+             + f"  กดค้าง {config.CLICK_HOLD_MS}ms  (" + (f"บอทลากเมาส์ไปครอบ {', '.join(priority)}" if names else "เมาส์คุณเอง ไม่ขยับให้") + ")"
              + ("  [dry_run]" if dry_run else "") + ("  [บันทึกวิดีโอ]" if record else ""))
 
     from .recorder import RoundRecorder
@@ -129,6 +135,8 @@ def assist_round(screen, dry_run=False, record=False, round_no=1):
             time.sleep(random.uniform(*ck.CLICK_HOLD))
             ck._send_mouse(up)
         done += 1
+        if tgt["item"] is not None:
+            tgt["clicked"], tgt["t"] = True, tp
         if rec is not None:
             rec.mark_click(done, t, grp)
         return t, tp
@@ -140,6 +148,28 @@ def assist_round(screen, dry_run=False, record=False, round_no=1):
     done, groups = 0, 0
     timed_due = None if timed_ms is None else t0 + timed_ms / 1000
     timed_fired = timed_due is None
+
+    def _esc_step():
+        if esc_pressed():
+            raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
+        return False
+
+    def goto_next():
+        """ลากเมาส์ไปครอบไอเท็มเป้าหมายตัวถัดไปในคิว (ไม่มีแล้ว = ปล่อยเมาส์ไว้)"""
+        if not queue:
+            tgt["item"] = None
+            return
+        name, item = queue.pop(0)
+        tgt.update(item=item, clicked=False, t=time.perf_counter(), chk=0.0)
+        hx, hy = _hover_point(item, box)
+        if not dry_run:
+            late = timed_due is not None and not timed_fired and time.perf_counter() > timed_due - 0.4
+            if not late:
+                move_to(hx, hy, on_step=_esc_step)
+            real_move(hx, hy)
+        log.info(f"  {ms():7.1f}ms  ลากเมาส์ไปครอบ {item_name(name)} ช่อง {slot_at((hx, hy)) + 1 if slot_at((hx, hy)) is not None else '-'}"
+                 f"  screen=({hx}, {hy})  (คิวเหลือ {len(queue)})")
+
     cur_idx = None
     armed, was_dim = True, False
     ready_since = None                    # เฟรมแรกที่ช่องนี้พร้อม (ไว้วัดว่ากดช้ากว่าช่องพร้อมกี่ ms)
@@ -162,6 +192,22 @@ def assist_round(screen, dry_run=False, record=False, round_no=1):
                 if miss >= ck.HEADER_LOST_FRAMES:
                     log.info(f"  {ms():7.1f}ms  Mission Reward หายไปแล้ว -> จบรอบ (กดไป {done} ครั้ง {groups} ชิ้น)")
                     return done
+            if pending and now - last_detect >= 0.05:                    # ยังไม่เจอไอเท็มเป้าหมาย: ลอง detect ถี่ๆ
+                last_detect = now
+                found = sorted(ck._detect_all(img, tnames, scale), key=rank)
+                if found:
+                    pending = False
+                    queue.extend(found)
+                    log.info(f"  {ms():7.1f}ms  เจอไอเท็มเป้าหมาย {len(found)} ตัว: "
+                             + ", ".join(f"{item_name(n)}@({it[0]},{it[1]})" for n, it in found))
+                    goto_next()
+                    continue
+            if tgt["item"] is not None and tgt["clicked"] and now - tgt["chk"] >= 0.05:
+                tgt["chk"] = now                                       # เก็บชิ้นนี้แล้ว (ช่องว่าง/นานเกิน) -> ไปชิ้นถัดไป
+                it = tgt["item"]
+                if _is_empty_slot(img, it[0], it[1], it[2], it[3], scale) or now - tgt["t"] > 1.5:
+                    goto_next()
+                    continue
             if not timed_fired and now >= timed_due - TIMED_LEAD:       # ถึงเวลากดตั้งเวลา: เช็กหัวข้อสดแล้ว spin รอเวลาเป๊ะ
                 timed_fired = True
                 if now > timed_due + 0.05:
@@ -224,17 +270,31 @@ def run_assist(argv):
     dry_run = "--dry" in argv
     record = bool(getattr(config, "ASSIST_RECORD", False))
     timed_ms = getattr(config, "ASSIST_CLICK_AT_MS", None)
-    if [a for a in argv if not a.startswith("--")]:
-        print("assist ไม่รับเวลา/ตัวเลือกจากคำสั่งแล้ว ตั้งที่ config.py (ASSIST_CLICK_AT_MS, ASSIST_RECORD, CAPTURE_BACKEND)")
+    names = None
+    args = [a for a in argv if not a.startswith("--")]
+    if args:                                                 # assist carrot / assist example_dungeon = บอทลากเมาส์ไปครอบไอเท็มให้
+        from .profiles import list_profiles, resolve
+        info = resolve(args)
+        for e in info["errors"]:
+            print(f"ผิดพลาด: {e}")
+        if info["errors"]:
+            return
+        if info["missing"]:
+            print(f"ไม่พบรูปไอเท็ม {info['missing']} (ต้องมีไฟล์ชื่อนี้.png ใน assets/templates/ หรือโฟลเดอร์โปรไฟล์)")
+            print(f"ที่มี: {info['available']}   โปรไฟล์ที่มี: {list_profiles() or '(ยังไม่มี)'}")
+            if not info["names"]:
+                return
+            print("-> ใช้เฉพาะที่หารูปเจอต่อไป")
+        names = info["names"]
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
-    log.info(f"[assist] เริ่มทำงาน (คุณคุมเมาส์ บอทกด{f'ที่ {timed_ms:g}ms และ' if timed_ms is not None else ''}ตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
+    log.info(f"[assist] เริ่มทำงาน ({'บอทลากเมาส์ไปครอบ ' + ', '.join(names) + ' และ' if names else 'คุณคุมเมาส์ บอท'}กด{f'ที่ {timed_ms:g}ms และ' if timed_ms is not None else ''}ตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
              f"ไม่มีคลิกสำรอง  จับภาพ={screen.backend}  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = assist_round(screen, dry_run, record, rounds + 1)
+            n = assist_round(screen, dry_run, record, rounds + 1, names)
             rounds += 1
             total += n
             log.info(f"[assist] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
