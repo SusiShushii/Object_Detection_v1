@@ -3,8 +3,8 @@ main.py - จุดเริ่มต้นเดียวของโปรแ�
 
     python main.py                       เมนู: เลือกเลขว่าจะทำอะไร
     python main.py run carrot            รันบอทเก็บของ (ชื่อไอเท็ม/โปรไฟล์ได้หลายชื่อ  --dry = ไม่คลิกจริง)
-    python main.py assist [3980]         คุณคุมเมาส์เอง บอทกดคลิกให้ตรงจังหวะ
-    python main.py collect               เก็บทุกช่องตามเวลา ไม่ detect ไอเท็ม + บันทึก loot
+    python main.py assist                คุณคุมเมาส์เอง บอทกดตามเวลา (ASSIST_CLICK_AT_MS) + ตามสีช่อง รวมโหมดเดียว (ตั้งที่ config.py)
+    python main.py random blue_seaweed   ด่าน random loot: รอกล่อง ? หาย แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ
     python main.py carrot                เหมือน run carrot (พิมพ์ชื่อไอเท็มตรงๆ ได้ เหมือนเดิม)
     python main.py wgc --check [--record] เช็ก WGC อ่านภาพจาก process เกมได้ไหม + fps จริง + record ค้างไว้
     python main.py region [shot.png]     เช็กกรอบจับภาพตรงหน้า Mission Reward ไหม + วาดกรอบ
@@ -15,8 +15,7 @@ main.py - จุดเริ่มต้นเดียวของโปรแ�
     python main.py analyze               สรุปสถิติจาก timing.log
     python main.py clickat 3988 --slot 1 ทดสอบกดที่เวลา X ms
     python main.py fps                   วัดรอบอัปเดตจอ / ความเร็วจับภาพ
-    ตัวเลือกวิธีจับภาพ (ใช้กับ run / assist / collect):  --capture wgc | --capture mss   (หรือ --wgc / --mss)
-                                  เช่น python main.py assist --react --record --capture mss
+    วิธีจับภาพ (wgc / mss) ตั้งที่ config.py (CAPTURE_BACKEND)   โหมด assist/react แยกส่วนสำหรับ debug: test_assist_and_react/
     python main.py <คำสั่ง> --help        วิธีใช้ของแต่ละคำสั่ง   (python main.py help = รายการนี้)
 
 ตั้งค่าจังหวะกด / ปุ่มหยุด ที่ config.py   ผลลัพธ์ทั้งหมดอยู่ที่ output/ (log ที่ output/logs/)
@@ -41,12 +40,8 @@ for _s in (sys.stdout, sys.stderr):
 COMMANDS = {
     "run": ("รันบอทเก็บของหน้า Mission Result", None,
             "ชื่อไอเท็ม/โปรไฟล์ เช่น  carrot  หรือ  water_dungeon  (เว้นว่าง = ทุกไอเท็ม)   เพิ่ม --dry = ไม่คลิกจริง"),
-    "collect": ("เก็บทุกช่องตามเวลา CLICK_AT_MS โดยไม่ detect ไอเท็ม (ไม่มี false negative) + บันทึกภาพ loot", None,
-                "เว้นว่าง = รันจริง   --dry = ไม่คลิกจริง   (ตั้งเวลา/กดค้างใน config.py)"),
-    "random": ("ด่าน random loot: รอกล่อง ? หายหมด + ของเป็นสีปกติ แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ", None,
-               "ชื่อไอเท็มตามลำดับความสำคัญ เช่น  blue_seaweed carrot  (เว้นว่าง = ทุกไอเท็มใน templates)   --dry = ไม่คลิกจริง   --capture wgc|mss"),
-    "assist": ("คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ (ที่เวลา CLICK_AT_MS หรือที่ระบุ)", None,
-               "เวลา(ms) เช่น  3980   (เว้นว่าง = ค่าใน config.py)   --once = กดครั้งเดียว   --react = กดตามสีช่อง/GET! (เมาส์คุณเอง; ใส่เวลาด้วยเช่น  3979 --react = กดที่เวลานั้น + ตามสีคู่กัน)   --ab = ทดลองเทียบ: สลับสุ่มรอบละวิธี (ตั้งเวลาอย่างเดียว/ตามสีอย่างเดียว) แล้วสรุปว่าอันไหนเก็บติด/เร็วกว่า   --record = บันทึกวิดีโอ+วิเคราะห์   --first 3995,4000,4005 = ทดสอบเวลาคลิกแรก   --second 4990,5000 = ทดสอบเวลาคลิกที่ 2 (นับจากหัวข้อ)   --after 1002,1012 = ทดสอบคลิกที่ 2 ห่างจากคลิกแรก (ms)   --dry"),
+    "assist": ("คุณคุมเมาส์เอง บอทกดให้ 2 อย่างคู่กัน: กดตามเวลา ASSIST_CLICK_AT_MS + กดตามสีช่อง (ทึบ→พร้อม/GET!) บันทึกวิดีโอตาม ASSIST_RECORD", None,
+               "ไม่ต้องใส่อะไร (ตั้งเวลา/วิธีจับภาพ/บันทึกที่ config.py)   --dry = ไม่คลิกจริง"),
     "region": ("เช็กว่ากรอบจับภาพตรงหน้า Mission Reward ไหม + วาดกรอบให้ดู (ไม่คลิก)", "tools.check_region",
                "เว้นว่าง = จับจอตอนนี้ (เปิดหน้า Mission Result ไว้)   หรือใส่ไฟล์ภาพแคปจอ เช่น  shot.png"),
     "wgc": ("เช็กว่า WGC อ่านภาพจาก process เกมได้ไหม + วัด fps จริง + record ค้างไว้ (ไม่คลิก)", "tools.wgc_check",
@@ -69,33 +64,8 @@ COMMANDS = {
 }
 
 
-def pop_capture(rest):
-    """แยกตัวเลือกวิธีจับภาพออกจากอาร์กิวเมนต์: --capture wgc|mss  หรือ  --wgc / --mss  คืน (อาร์กิวเมนต์ที่เหลือ, วิธีที่เลือก หรือ None)"""
-    out, backend, i = [], None, 0
-    while i < len(rest):
-        a = rest[i]
-        if a in ("--capture", "--backend") and i + 1 < len(rest):
-            backend, i = rest[i + 1].lower(), i + 2
-        elif a.startswith(("--capture=", "--backend=")):
-            backend, i = a.split("=", 1)[1].lower(), i + 1
-        elif a in ("--wgc", "--mss"):
-            backend, i = a[2:], i + 1
-        else:
-            out.append(a)
-            i += 1
-    return out, backend
-
-
 def run_command(cmd, rest):
     desc, module, _ = COMMANDS[cmd]
-    rest, backend = pop_capture(rest)
-    if backend is not None:
-        if backend not in ("wgc", "mss"):
-            print(f"--capture ต้องเป็น wgc หรือ mss (ได้ '{backend}')")
-            return
-        import config
-        config.CAPTURE_BACKEND = backend            # ใช้เฉพาะรอบนี้ ไม่แก้ไฟล์ config.py
-        print(f"[main] วิธีจับภาพรอบนี้: {backend}")
     if cmd == "assist":
         if "--help" in rest or "-h" in rest:
             print(COMMANDS["assist"][2])
@@ -109,13 +79,6 @@ def run_command(cmd, rest):
             return
         from detector.collector import run_random
         run_random(rest)
-        return
-    if cmd == "collect":
-        if "--help" in rest or "-h" in rest:
-            print(COMMANDS["collect"][2])
-            return
-        from detector.collector import run_collect
-        run_collect(rest)
         return
     if cmd == "run":
         if "--help" in rest or "-h" in rest:
