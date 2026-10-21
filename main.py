@@ -43,6 +43,8 @@ COMMANDS = {
             "ชื่อไอเท็ม/โปรไฟล์ เช่น  carrot  หรือ  water_dungeon  (เว้นว่าง = ทุกไอเท็ม)   เพิ่ม --dry = ไม่คลิกจริง"),
     "collect": ("เก็บทุกช่องตามเวลา CLICK_AT_MS โดยไม่ detect ไอเท็ม (ไม่มี false negative) + บันทึกภาพ loot", None,
                 "เว้นว่าง = รันจริง   --dry = ไม่คลิกจริง   (ตั้งเวลา/กดค้างใน config.py)"),
+    "random": ("ด่าน random loot: รอกล่อง ? หายหมด + ของเป็นสีปกติ แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ", None,
+               "ชื่อไอเท็มตามลำดับความสำคัญ เช่น  blue_seaweed carrot  (เว้นว่าง = ทุกไอเท็มใน templates)   --dry = ไม่คลิกจริง   --capture wgc|mss"),
     "assist": ("คุณคุมเมาส์/เลือกช่องเอง บอทแค่กดคลิกให้ตรงจังหวะ (ที่เวลา CLICK_AT_MS หรือที่ระบุ)", None,
                "เวลา(ms) เช่น  3980   (เว้นว่าง = ค่าใน config.py)   --once = กดครั้งเดียว   --react = กดตามสีช่อง/GET! (เมาส์คุณเอง)   --record = บันทึกวิดีโอ+วิเคราะห์   --first 3995,4000,4005 = ทดสอบเวลาคลิกแรก   --second 4990,5000 = ทดสอบเวลาคลิกที่ 2 (นับจากหัวข้อ)   --after 1002,1012 = ทดสอบคลิกที่ 2 ห่างจากคลิกแรก (ms)   --dry"),
     "region": ("เช็กว่ากรอบจับภาพตรงหน้า Mission Reward ไหม + วาดกรอบให้ดู (ไม่คลิก)", "tools.check_region",
@@ -98,6 +100,13 @@ def run_command(cmd, rest):
             return
         from detector.collector import run_assist
         run_assist(rest)
+        return
+    if cmd == "random":
+        if "--help" in rest or "-h" in rest:
+            print(COMMANDS["random"][2])
+            return
+        from detector.collector import run_random
+        run_random(rest)
         return
     if cmd == "collect":
         if "--help" in rest or "-h" in rest:
