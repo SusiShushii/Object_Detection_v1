@@ -370,7 +370,7 @@ def run_assist(argv):
         return
     if deltas:
         second = [at_ms + d for d in deltas]            # เวลาคลิกที่ 2 = คลิกแรก + d (ระยะห่างคงที่จากคลิกแรกพอดี)
-    clicks = 1 if once else max(1, config.MAX_CLICKS_PER_ITEM)
+    clicks = 1                                      # ไม่มีคลิกสำรองอัตโนมัติ (อยากกดหลายครั้งให้ระบุเวลาเอง เช่น 3988,5000)
     if fixed:
         clicks = len(fixed)
     if second:
@@ -381,7 +381,7 @@ def run_assist(argv):
     tuned = tune_realtime()
     log.info("#" * 60)
     log.info(f"[assist] เริ่มทำงาน (คุณคุมเมาส์ บอทกดให้ตรงจังหวะ)  dry_run={dry_run}  กดที่ {at_ms:.0f}ms  "
-             f"{clicks} ครั้ง ห่าง {config.RETRY_AFTER_MS}ms  กดค้าง {config.CLICK_HOLD_MS}ms  {tuned}  "
+             f"{clicks} ครั้ง  กดค้าง {config.CLICK_HOLD_MS}ms  จับภาพ={screen.backend}  {tuned}  "
              f"กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
     rounds, total, errors = 0, 0, 0
     while True:
@@ -441,6 +441,18 @@ def run_assist(argv):
 # โหมดตามสี (python main.py assist --react): คุณคุมเมาส์ บอทกดทันทีที่ช่องใต้เมาส์พร้อมเก็บ
 # ---------------------------------------------------------------------------
 
+def _summarize_clicks(screen, click_info, verdicts, cap0):
+    """สรุปท้ายรอบ: จับภาพด้วยอะไร (wgc/mss + กี่เฟรมที่ตกไปใช้ mss) และแต่ละคลิกกดที่กี่ ms ด้วยวิธีไหน เก็บติดไหม"""
+    fb = getattr(screen, "fallbacks", 0) - cap0
+    log.info(f"[สรุปรอบ] จับภาพ={screen.backend}" + (f"  (ตกไปใช้ mss {fb} เฟรม)" if fb else "")
+             + ("" if verdicts is not None or not click_info else "   (ใส่ --record เพื่อดูว่าคลิกไหนเก็บติด)"))
+    vd = {n: (ok, text) for n, _, ok, text in (verdicts or [])}
+    for n, t, method, slot in click_info:
+        ok = vd.get(n, (None, ""))[0]
+        res = "" if verdicts is None else ("  -> เก็บติด" if ok else "  -> ไม่ติด/ไม่ได้เก็บ")
+        log.info(f"[สรุปรอบ]   คลิกที่ {n}: {t:7.1f}ms  วิธี={method}  ช่อง {slot + 1 if slot is not None else '-'}{res}")
+
+
 def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
     """1 รอบ: รอหัวข้อ Mission Reward -> เฝ้าช่องใต้เมาส์ (เมาส์คุณเอง ไม่ขยับ)
     กดทันทีเมื่อ  พื้นหลังช่องเปลี่ยนจากทึบเป็นสีปกติ  หรือ  เห็นป้าย GET!  (OR)
@@ -468,10 +480,14 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
     react_round.verdicts = []
-    backup = config.REACT_BACKUP_MS
+    combined = timed_ms is not None                               # โหมดรวม (ตั้งเวลา + ตามสี): ไม่มีคลิกสำรอง/กดใหม่
+    backup = 0 if combined else config.REACT_BACKUP_MS
+    cap0 = getattr(screen, "fallbacks", 0)
+    click_info = []                                               # (คลิกที่, ms, วิธี, ช่อง)
     log.info("=" * 60)
     log.info("[react] เห็น Mission Reward  " + (f"กดตั้งเวลาที่ {timed_ms:g}ms + " if timed_ms is not None else "")
              + "เฝ้าช่องใต้เมาส์: กดทันทีเมื่อ (ทึบ→พร้อม) หรือ (เห็น GET!)"
+             + f"  จับภาพ={screen.backend}"
              + (f"  +กดซ้ำ {backup:.0f}ms" if backup else "") + f"  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้)"
              + ("  [dry_run]" if dry_run else "") + ("  [บันทึกวิดีโอ]" if record else ""))
 
@@ -539,6 +555,7 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
                         time.sleep(0)
                     groups += 1
                     tt, _ = send_click(groups)
+                    click_info.append((done, tt, "ตั้งเวลา", slot_at(ck.get_cursor())))
                     log_click("ตั้งเวลา", tt, done, f"(ตั้งไว้ {timed_ms:g}ms)")
                     continue
             idx = slot_at(cur)
@@ -561,7 +578,7 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
                     last_empty = _is_empty_slot(img, item[0], item[1], item[2], item[3], scale)
                 if last_empty:
                     armed, was_dim, ready_since, fired_at, retries = True, False, None, None, 0
-                elif (fired_at is not None and now - fired_at >= config.REACT_RETRY_MS / 1000 and retries < 2
+                elif (fired_at is not None and now - fired_at >= config.REACT_RETRY_MS / 1000 and retries < (0 if combined else 2)
                       and _get_score(img, ("x", item), scale) >= GET_MATCH):
                     armed, retries = True, retries + 1                   # กดแล้วช่องยังพร้อมค้าง (มีป้าย GET!) = ไม่ติด -> กดใหม่
                     log.info(f"  {ms():7.1f}ms  ช่อง {idx + 1} ยังพร้อมค้างหลังกด {config.REACT_RETRY_MS:.0f}ms -> กดใหม่")
@@ -578,6 +595,7 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
             groups += 1
             t1, tp1 = send_click(groups)
             n1 = done
+            click_info.append((done, t1, f"ตามสี ({reason})", idx))
             armed, fired_at = False, tp1
             t2 = None
             if backup:                                                   # กดซ้ำกันพลาดให้ตรงเวลา (spin ไม่รอรอบลูปถัดไป ไม่ log คั่นกลาง)
@@ -588,10 +606,12 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
             log_click(f"ชิ้นที่ {groups}", t1, n1, f"[{reason}] ช่อง {idx + 1} V={v:.0f} (ช่องพร้อมมาแล้ว {lat:.1f}ms)")
             if t2 is not None:
                 log_click("กันพลาด", t2, done, f"(ห่างคลิกแรก {t2 - t1:.1f}ms)")
+                click_info.append((done, t2, "กันพลาด", idx))
     finally:
         if rec is not None:
             rec.finish(log)
             react_round.verdicts = rec.verdicts
+        _summarize_clicks(screen, click_info, rec.verdicts if rec is not None else None, cap0)
 
 
 def run_react(argv):
@@ -603,7 +623,7 @@ def run_react(argv):
     tuned = tune_realtime()
     log.info("#" * 60)
     log.info(f"[react] เริ่มทำงาน (คุณคุมเมาส์ บอทกด{f'ที่ {timed_ms:g}ms และ' if timed_ms is not None else ''}ตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
-             f"กดซ้ำ {config.REACT_BACKUP_MS}ms  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
+             f"กดซ้ำ {0 if timed_ms is not None else config.REACT_BACKUP_MS}ms  จับภาพ={screen.backend}  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
     rounds, total, errors = 0, 0, 0
     while True:
         try:
