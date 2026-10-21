@@ -419,8 +419,7 @@ def random_round(screen, names=None, dry_run=False):
 
 def run_random(argv):
     dry_run = "--dry" in argv
-    # ชื่อไอเท็ม: random blue_seaweed  หรือ  random --blue_seaweed  (ยกเว้น --dry)
-    names = [a.lstrip("-") for a in argv if a != "--dry"] or None
+    names = [a for a in argv if not a.startswith("--")] or None     # random blue_seaweed carrot
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
