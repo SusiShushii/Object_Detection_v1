@@ -441,11 +441,12 @@ def run_assist(argv):
 # โหมดตามสี (python main.py assist --react): คุณคุมเมาส์ บอทกดทันทีที่ช่องใต้เมาส์พร้อมเก็บ
 # ---------------------------------------------------------------------------
 
-def react_round(screen, dry_run=False, record=False, round_no=1):
+def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
     """1 รอบ: รอหัวข้อ Mission Reward -> เฝ้าช่องใต้เมาส์ (เมาส์คุณเอง ไม่ขยับ)
     กดทันทีเมื่อ  พื้นหลังช่องเปลี่ยนจากทึบเป็นสีปกติ  หรือ  เห็นป้าย GET!  (OR)
     กดครั้งแรกแล้ว กดซ้ำกันพลาดอีกครั้งหลัง REACT_BACKUP_MS  แล้วเฝ้าช่องเดิมรอชิ้นถัดไปต่อ
-    จนกว่า Mission Reward จะหายไป (บันทึกวิดีโอ/log ต่อจนหัวข้อหายด้วย)  คืนจำนวนคลิก"""
+    จนกว่า Mission Reward จะหายไป (บันทึกวิดีโอ/log ต่อจนหัวข้อหายด้วย)  คืนจำนวนคลิก
+    timed_ms: ถ้าระบุ จะกดตรงตำแหน่งเมาส์ที่เวลานี้ (ms จากหัวข้อ) 1 ครั้งด้วย  ไม่ติดก็ยังมีส่วนตามสีทำงานต่อ"""
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
     rects = slot_rects(scale)
@@ -469,7 +470,8 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
     react_round.verdicts = []
     backup = config.REACT_BACKUP_MS
     log.info("=" * 60)
-    log.info("[react] เห็น Mission Reward  เฝ้าช่องใต้เมาส์: กดทันทีเมื่อ (ทึบ→พร้อม) หรือ (เห็น GET!)"
+    log.info("[react] เห็น Mission Reward  " + (f"กดตั้งเวลาที่ {timed_ms:g}ms + " if timed_ms is not None else "")
+             + "เฝ้าช่องใต้เมาส์: กดทันทีเมื่อ (ทึบ→พร้อม) หรือ (เห็น GET!)"
              + (f"  +กดซ้ำ {backup:.0f}ms" if backup else "") + f"  กดค้าง {config.CLICK_HOLD_MS}ms  (เมาส์คุณเอง ไม่ขยับให้)"
              + ("  [dry_run]" if dry_run else "") + ("  [บันทึกวิดีโอ]" if record else ""))
 
@@ -502,6 +504,8 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
         log.info(f"  {t:7.1f}ms  กด {label} (คลิกที่ {n_click}) {reason}  screen=({x}, {y})")
 
     done, groups = 0, 0
+    timed_due = None if timed_ms is None else t0 + timed_ms / 1000
+    timed_fired = timed_due is None
     cur_idx = None
     armed, was_dim = True, False
     ready_since = None                    # เฟรมแรกที่ช่องนี้พร้อม (ไว้วัดว่ากดช้ากว่าช่องพร้อมกี่ ms)
@@ -524,6 +528,19 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
                 if miss >= ck.HEADER_LOST_FRAMES:
                     log.info(f"  {ms():7.1f}ms  Mission Reward หายไปแล้ว -> จบรอบ (กดไป {done} ครั้ง {groups} ชิ้น)")
                     return done
+            if not timed_fired and now >= timed_due - TIMED_LEAD:       # ถึงเวลากดตั้งเวลา: เช็กหัวข้อสดแล้ว spin รอเวลาเป๊ะ
+                timed_fired = True
+                if now > timed_due + 0.05:
+                    log.info(f"  {ms():7.1f}ms  เลยเวลากดตั้งเวลา {timed_ms:g}ms ไปแล้ว -> ข้าม (ใช้ตามสีแทน)")
+                elif _header_score(screen.grab(box), scale) < HEADER_MATCH:
+                    log.info(f"  {ms():7.1f}ms  ไม่เห็นหัวข้อก่อนกดตั้งเวลา -> ไม่กด")
+                else:
+                    while time.perf_counter() < timed_due:
+                        time.sleep(0)
+                    groups += 1
+                    tt, _ = send_click(groups)
+                    log_click("ตั้งเวลา", tt, done, f"(ตั้งไว้ {timed_ms:g}ms)")
+                    continue
             idx = slot_at(cur)
             if idx != cur_idx:                                           # ย้ายเมาส์ไปช่องอื่น: เริ่มเฝ้าช่องใหม่
                 cur_idx, armed, was_dim, ready_since, fired_at, retries = idx, True, False, None, None, 0
@@ -580,15 +597,17 @@ def react_round(screen, dry_run=False, record=False, round_no=1):
 def run_react(argv):
     dry_run = "--dry" in argv
     record = "--record" in argv
+    nums = [a for a in argv if not a.startswith("--")]
+    timed_ms = float(nums[0]) if nums else None             # assist 3979 --react = กดตั้งเวลา + ตามสี ทำงานคู่กัน
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
-    log.info(f"[react] เริ่มทำงาน (คุณคุมเมาส์ บอทกดตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
+    log.info(f"[react] เริ่มทำงาน (คุณคุมเมาส์ บอทกด{f'ที่ {timed_ms:g}ms และ' if timed_ms is not None else ''}ตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
              f"กดซ้ำ {config.REACT_BACKUP_MS}ms  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = react_round(screen, dry_run, record, rounds + 1)
+            n = react_round(screen, dry_run, record, rounds + 1, timed_ms)
             rounds += 1
             total += n
             log.info(f"[react] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")

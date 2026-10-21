@@ -6,5 +6,5 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-".venv\Scripts\python.exe" main.py assist 3988 --wgc --record %*
+".venv\Scripts\python.exe" main.py assist 3979 --react --wgc --record %*
 pause
