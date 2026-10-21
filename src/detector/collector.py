@@ -436,7 +436,11 @@ def run_random(argv):
         if not info["names"]:
             return
         print("-> เก็บเฉพาะที่หารูปเจอต่อไป")
-    names = info["names"] or None                                   # None = ทุกไอเท็มใน assets/templates/
+    names = info["names"]
+    if not names:                                                   # ไม่ระบุอะไรเลย = ไม่ทำงาน (กันกดทุกไอเท็มโดยไม่ตั้งใจ)
+        print("ต้องระบุชื่อไอเท็มหรือโปรไฟล์ เช่น  python main.py random blue_seaweed  หรือ  python main.py random example_dungeon"
+              f"  (ดูรายชื่อ: python main.py random --list)  รูปที่มี: {info['available']}")
+        return
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
