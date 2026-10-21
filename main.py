@@ -51,6 +51,8 @@ COMMANDS = {
                "เว้นว่าง = จับจอตอนนี้ (เปิดหน้า Mission Result ไว้)   หรือใส่ไฟล์ภาพแคปจอ เช่น  shot.png"),
     "wgc": ("เช็กว่า WGC อ่านภาพจาก process เกมได้ไหม + วัด fps จริง + record ค้างไว้ (ไม่คลิก)", "tools.wgc_check",
             "--check   (+ --record = วิดีโอกรอบบอท  --full = ทั้งหน้าต่างเกม  --seconds 30 = เช็กแค่ 30 วิ)"),
+    "capcmp": ("เทียบ WGC กับ mss พร้อมกันบนเกมจริง: ใครเห็นหัวข้อ/สีปกติก่อน ใครแกว่งกว่า (ไม่คลิก)", "tools.capture_compare",
+            "--rounds 15 = หยุดเองเมื่อครบ 15 รอบ (เว้นว่าง = เปิดทิ้งไว้ หยุดด้วย F12 ค้าง / Ctrl+C)"),
     "prepare": ("เตรียมรูปไอเท็มที่ครอปเอง (จอ 2K/1080p ปนกัน) ใส่ data/inbox แล้วตรวจ+ปรับเป็น 62x65", "tools.prepare_templates",
                 "เว้นว่าง = ตรวจรูปใน data/inbox   --apply = บันทึกลง assets/templates   --src 1080 / --force"),
     "crop": ("ครอปรูปไอเท็มอัตโนมัติจากภาพที่บอทบันทึก (output/loot)", "tools.crop_templates",
