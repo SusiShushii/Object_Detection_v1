@@ -453,11 +453,12 @@ def _summarize_clicks(screen, click_info, verdicts, cap0):
         log.info(f"[สรุปรอบ]   คลิกที่ {n}: {t:7.1f}ms  วิธี={method}  ช่อง {slot + 1 if slot is not None else '-'}{res}")
 
 
-def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
+def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None, mode=None):
     """1 รอบ: รอหัวข้อ Mission Reward -> เฝ้าช่องใต้เมาส์ (เมาส์คุณเอง ไม่ขยับ)
     กดทันทีเมื่อ  พื้นหลังช่องเปลี่ยนจากทึบเป็นสีปกติ  หรือ  เห็นป้าย GET!  (OR)
     กดครั้งแรกแล้ว กดซ้ำกันพลาดอีกครั้งหลัง REACT_BACKUP_MS  แล้วเฝ้าช่องเดิมรอชิ้นถัดไปต่อ
     จนกว่า Mission Reward จะหายไป (บันทึกวิดีโอ/log ต่อจนหัวข้อหายด้วย)  คืนจำนวนคลิก
+    mode (ใช้ทดลอง --ab): "timed" = กดตั้งเวลาอย่างเดียว  "react" = ตามสีอย่างเดียว  None = ทั้งคู่
     timed_ms: ถ้าระบุ จะกดตรงตำแหน่งเมาส์ที่เวลานี้ (ms จากหัวข้อ) 1 ครั้งด้วย  ไม่ติดก็ยังมีส่วนตามสีทำงานต่อ"""
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
@@ -480,7 +481,10 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
     react_round.verdicts = []
-    combined = timed_ms is not None                               # โหมดรวม (ตั้งเวลา + ตามสี): ไม่มีคลิกสำรอง/กดใหม่
+    if mode == "react":
+        timed_ms = None
+    use_react = mode != "timed"
+    combined = timed_ms is not None or mode is not None           # โหมดรวม/ทดลอง: ไม่มีคลิกสำรอง/กดใหม่
     backup = 0 if combined else config.REACT_BACKUP_MS
     cap0 = getattr(screen, "fallbacks", 0)
     click_info = []                                               # (คลิกที่, ms, วิธี, ช่อง)
@@ -558,6 +562,8 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
                     click_info.append((done, tt, "ตั้งเวลา", slot_at(ck.get_cursor())))
                     log_click("ตั้งเวลา", tt, done, f"(ตั้งไว้ {timed_ms:g}ms)")
                     continue
+            if not use_react:
+                continue
             idx = slot_at(cur)
             if idx != cur_idx:                                           # ย้ายเมาส์ไปช่องอื่น: เริ่มเฝ้าช่องใหม่
                 cur_idx, armed, was_dim, ready_since, fired_at, retries = idx, True, False, None, None, 0
@@ -611,7 +617,35 @@ def react_round(screen, dry_run=False, record=False, round_no=1, timed_ms=None):
         if rec is not None:
             rec.finish(log)
             react_round.verdicts = rec.verdicts
+        react_round.clicks = click_info
         _summarize_clicks(screen, click_info, rec.verdicts if rec is not None else None, cap0)
+
+
+def _ab_collect(res, mode, clicks, verdicts):
+    """เก็บผลทดลองรอบนี้: (เก็บติดไหม, คลิกที่กี่ ms, ช่องว่างจริงที่กี่ ms จากหัวข้อ)  แล้วพิมพ์สรุปสะสม"""
+    import re
+    if not clicks:
+        res[mode].append((None, None, None))                           # ไม่มีคลิกเลย (ตามสีไม่ทำงาน / พลาดเวลา)
+    else:
+        _, t, _, _ = clicks[0]
+        v = next((x for x in verdicts if x[1] == min(c[1] for c in clicks)), None)
+        ok = None if v is None else v[2]
+        got = None
+        if ok:
+            m = re.search(r"(?:ช่องว่าง|ทึบแว้บ)ที่ \+(\d+)ms", v[3])
+            got = t + float(m.group(1)) if m else None
+        res[mode].append((ok, t, got))
+    for k, name in (("timed", "ตั้งเวลา"), ("react", "ตามสี")):
+        rs = res[k]
+        if not rs:
+            continue
+        oks = [r for r in rs if r[0]]
+        none = sum(1 for r in rs if r[1] is None)
+        cl = [r[1] for r in oks]
+        gt = [r[2] for r in oks if r[2] is not None]
+        avg = lambda xs: f"{sum(xs) / len(xs):.1f}" if xs else "-"
+        log.info(f"[ab] สะสม {name}: เก็บติด {len(oks)}/{len(rs)} รอบ (ไม่ได้กดเลย {none})  "
+                 f"กดเฉลี่ย {avg(cl)}ms  เก็บเสร็จ(ช่องว่าง)เฉลี่ย {avg(gt)}ms")
 
 
 def run_react(argv):
@@ -619,6 +653,13 @@ def run_react(argv):
     record = "--record" in argv
     nums = [a for a in argv if not a.startswith("--")]
     timed_ms = float(nums[0]) if nums else None             # assist 3979 --react = กดตั้งเวลา + ตามสี ทำงานคู่กัน
+    ab = "--ab" in argv                                      # ทดลอง: สลับสุ่มรอบละวิธี (ตั้งเวลาอย่างเดียว / ตามสีอย่างเดียว) เทียบกัน
+    if ab:
+        if timed_ms is None:
+            print("--ab ต้องระบุเวลา เช่น  python main.py assist 3979 --react --ab")
+            return
+        record = True                                        # ต้องมีวิดีโอ/trace ถึงจะรู้ว่าเก็บได้เมื่อไร
+    ab_res, ab_order = {"timed": [], "react": []}, []
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
@@ -627,7 +668,15 @@ def run_react(argv):
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = react_round(screen, dry_run, record, rounds + 1, timed_ms)
+            mode = None
+            if ab:
+                if not ab_order:
+                    ab_order = random.sample(["timed", "react"], 2)
+                mode = ab_order.pop()
+                log.info(f"[ab] รอบที่ {rounds + 1}: ทดลองวิธี = {'ตั้งเวลา ' + format(timed_ms, 'g') + 'ms อย่างเดียว' if mode == 'timed' else 'ตามสีอย่างเดียว'}")
+            n = react_round(screen, dry_run, record, rounds + 1, timed_ms, mode)
+            if ab:
+                _ab_collect(ab_res, mode, react_round.clicks, react_round.verdicts)
             rounds += 1
             total += n
             log.info(f"[react] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
