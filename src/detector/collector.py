@@ -419,7 +419,24 @@ def random_round(screen, names=None, dry_run=False):
 
 def run_random(argv):
     dry_run = "--dry" in argv
-    names = [a for a in argv if not a.startswith("--")] or None     # random blue_seaweed carrot
+    from .profiles import list_profiles, resolve
+    args = [a for a in argv if not a.startswith("--")]               # random blue_seaweed carrot  หรือ  random example_dungeon
+    info = resolve(args)
+    if "--list" in argv:
+        print(f"รูปไอเท็มที่มี: {info['available']}")
+        print(f"โปรไฟล์ที่มี: {list_profiles() or '(ยังไม่มี)'}")
+        return
+    for e in info["errors"]:
+        print(f"ผิดพลาด: {e}")
+    if info["errors"]:
+        return
+    if info["missing"]:
+        print(f"ไม่พบรูปไอเท็ม {info['missing']} (ต้องมีไฟล์ชื่อนี้.png ใน assets/templates/ หรือโฟลเดอร์โปรไฟล์)")
+        print(f"ที่มี: {info['available']}   โปรไฟล์ที่มี: {list_profiles() or '(ยังไม่มี)'}")
+        if not info["names"]:
+            return
+        print("-> เก็บเฉพาะที่หารูปเจอต่อไป")
+    names = info["names"] or None                                   # None = ทุกไอเท็มใน assets/templates/
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
