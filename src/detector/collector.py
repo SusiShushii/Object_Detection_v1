@@ -322,7 +322,8 @@ def run_assist(argv):
 # ช่องเป็นกล่อง "?" -> รอกล่องหายหมด + ของเป็นสีปกติ -> ขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ (ตามลำดับความสำคัญ)
 # ---------------------------------------------------------------------------
 RANDOM_BOX_GONE_FRAMES = 2     # ไม่เห็นกล่อง "?" ติดกันกี่เฟรมถึงถือว่ากล่องหายหมด
-RANDOM_NO_BOX_WAIT = 1.0       # เห็นหัวข้อแล้วนานเท่านี้ (วินาที) ยังไม่เจอกล่อง "?" เลย = ไม่ใช่ด่าน random loot -> ข้ามรอบนี้
+RANDOM_NO_BOX_WAIT = 0.6       # ไอเท็มขึ้นแล้ว (~3 วินาทีหลังหัวข้อ) แต่ไม่เจอกล่อง "?" นานเท่านี้ (วินาที) = ไม่ใช่ด่าน random loot -> ข้ามรอบนี้
+RANDOM_NOTHING_WAIT = 10.0     # เห็นหัวข้อแล้วช่องยังว่างทั้งหมดนานเท่านี้ (วินาที) = เลิกรอบนี้
 RANDOM_READY_WAIT = 1.5        # กล่องหายแล้ว รอไอเท็มเป้าหมายเป็นสีปกติไม่เกินเท่านี้ (วินาที)
 
 
@@ -376,7 +377,8 @@ def random_round(screen, names=None, dry_run=False):
         return not check_frame(screen.grab(box))
 
     # ---- 1) รอกล่อง ? หายหมด ----
-    seen_box, gone = False, 0
+    seen_box, gone, items_since = False, 0, None
+    rects = slot_rects(scale)
     while True:
         if esc_pressed():
             raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
@@ -393,9 +395,16 @@ def random_round(screen, names=None, dry_run=False):
             gone += 1
             if gone >= RANDOM_BOX_GONE_FRAMES:
                 break
-        elif ms() > RANDOM_NO_BOX_WAIT * 1000:
-            log.info(f"  {ms():7.0f}ms  ไม่เจอกล่อง ? -> ไม่ใช่ด่าน random loot ข้ามรอบนี้ (ใช้ run แทน)")
-            return clicked
+        else:
+            now = time.perf_counter()
+            if _occupied(img, scale, rects):                           # ไอเท็มขึ้นแล้วแต่ยังไม่เห็นกล่อง ?
+                items_since = items_since or now
+                if now - items_since > RANDOM_NO_BOX_WAIT:
+                    log.info(f"  {ms():7.0f}ms  ไอเท็มขึ้นแล้วแต่ไม่เจอกล่อง ? -> ไม่ใช่ด่าน random loot ข้ามรอบนี้ (ใช้ run แทน)")
+                    return clicked
+            elif ms() > RANDOM_NOTHING_WAIT * 1000:
+                log.info(f"  {ms():7.0f}ms  ช่องยังว่างอยู่นานเกินไป -> เลิกรอบนี้")
+                return clicked
     log.info(f"  {ms():7.0f}ms  กล่อง ? หายหมดแล้ว")
 
     # ---- 2) หาไอเท็มเป้าหมาย + รอให้เป็นสีปกติ ----
