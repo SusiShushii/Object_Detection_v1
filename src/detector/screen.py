@@ -106,10 +106,12 @@ class Screen:
         """(left, top, width, height) ของพื้นที่เกม 16:9 ที่อยู่กลางจอ"""
         left, top, screen_w, screen_h = self.get_screen_rect()
 
-        game_w = min(screen_w, screen_h * GAME_ASPECT)
-        game_h = game_w / GAME_ASPECT
+        # UI ของเกมขยายตาม "ความสูง" ของจอเสมอ (วัดจริงบนจอ 2880x1800 16:10: สเกล = 1800/1440 = 1.25 ไม่ใช่ย่อให้พอดีความกว้าง)
+        # จอแคบกว่า 16:9 (เช่น 16:10) -> พื้นที่เกม 16:9 กว้างเกินจอ จัดกึ่งกลาง (off_x ติดลบได้)  จอกว้างกว่า 16:9 -> มีขอบข้าง
+        game_h = screen_h
+        game_w = game_h * GAME_ASPECT
         off_x = (screen_w - game_w) / 2
-        off_y = (screen_h - game_h) / 2
+        off_y = 0
 
         return left + off_x, top + off_y, game_w, game_h
 
