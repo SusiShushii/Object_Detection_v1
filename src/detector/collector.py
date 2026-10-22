@@ -327,8 +327,17 @@ RANDOM_NOTHING_WAIT = 10.0     # เห็นหัวข้อแล้วช�
 RANDOM_READY_WAIT = 1.5        # กล่องหายแล้ว รอไอเท็มเป้าหมายเป็นสีปกติไม่เกินเท่านี้ (วินาที)
 
 
-def random_round(screen, names=None, dry_run=False):
-    """1 รอบด่าน random loot  names = ชื่อไอเท็มที่ต้องการ (None = ทุกไอเท็มใน templates/)  คืนจำนวนคลิก"""
+def random_round(screen, names=None, dry_run=False, record=False, round_no=1):
+    """1 รอบด่าน random loot  names = ชื่อไอเท็มที่ต้องการ  record = บันทึกวิดีโอ/trace/วิเคราะห์ (ASSIST_RECORD)  คืนจำนวนคลิก"""
+    hooks = {"rec": None}
+    try:
+        return _random_body(screen, names, dry_run, record, round_no, hooks)
+    finally:
+        if hooks["rec"] is not None:
+            hooks["rec"].finish(log)
+
+
+def _random_body(screen, names, dry_run, record, round_no, hooks):
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
     down, up = ck.MOUSE_FLAGS["left"]
@@ -354,6 +363,8 @@ def random_round(screen, names=None, dry_run=False):
         time.sleep(0.002)
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
+    from .recorder import RoundRecorder
+    rec = hooks["rec"] = RoundRecorder(scale, box, slot_rects(scale), t0, round_no) if record else None
     log.info("=" * 60)
     log.info(f"[random] เห็น Mission Reward  เป้าหมาย: {', '.join(priority) if priority else 'ทุกไอเท็ม'}"
              f"  รอกล่อง ? หาย + ของสีปกติ{'  [dry_run]' if dry_run else ''}")
@@ -361,6 +372,8 @@ def random_round(screen, names=None, dry_run=False):
     state = {"miss": 0, "last_hdr": 0.0}
 
     def check_frame(frame):
+        if rec is not None:
+            rec.add(frame, ck.get_cursor())
         _loot_log(frame, scale)
         now = time.perf_counter()
         if now - state["last_hdr"] >= HDR_EVERY:
@@ -451,6 +464,8 @@ def random_round(screen, names=None, dry_run=False):
             time.sleep(random.uniform(*ck.CLICK_HOLD))
             ck._send_mouse(up)
         clicked += 1
+        if rec is not None:
+            rec.mark_click(clicked, ms(), clicked)
         log.info(f"  {ms():7.0f}ms  กด {label}  screen=({x}, {y})")
         return True
 
@@ -518,7 +533,7 @@ def run_random(argv):
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = random_round(screen, names, dry_run)
+            n = random_round(screen, names, dry_run, bool(getattr(config, "ASSIST_RECORD", False)), rounds + 1)
             rounds += 1
             total += n
             log.info(f"[random] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
