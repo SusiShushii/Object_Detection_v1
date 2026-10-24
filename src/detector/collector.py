@@ -1,13 +1,10 @@
 """
-collector.py - โหมด "เก็บทุกช่องตามเวลา" (python main.py collect)
+collector.py - โหมด assist และ random (python main.py assist / random)
 
-ไม่ใช้การ detect ไอเท็ม (ไม่มี template matching ของไอเท็ม) จึงไม่มี false negative:
-    1. รอหัวข้อ Mission Reward (นับเวลาจากเฟรมแรกที่เห็น เหมือนโหมดปกติ)
-    2. รอไอเท็มขึ้นครบ (ช่องที่ไม่ว่าง = มีของ ตรวจแค่ "ช่องว่างหรือไม่") แล้ววางเมาส์รอที่ช่องแรก
-    3. ถึงเวลา CLICK_AT_MS (config.py) -> กดช่องแรก แล้วไล่กดช่องที่เหลือตามลำดับ ซ้าย->ขวา บน->ล่าง
-    4. ตรวจซ้ำ: ช่องไหนยังไม่ว่าง กดอีกรอบ (สูงสุด COLLECT_MAX_PASSES)
-    5. บันทึกภาพ loot (ตอนทึบ + ตอนสีปกติ) ลง output/loot เหมือนเดิม  -> ใช้ crop ตัดรูปไอเท็มต่อได้
-กดทุกอย่างที่อยู่ในกรอบ = เก็บของที่ไม่ต้องการไปด้วย
+assist : คุณคุมเมาส์ (หรือใส่ชื่อไอเท็มให้บอทขยับเมาส์ให้) บอทกด 2 อย่างคู่กัน: ตามเวลา CLICK_AT_MS + ตามสีช่อง (ทึบ->พร้อม / GET!)
+random : ด่าน random loot รอกล่อง ? หายหมด + ของเป็นสีปกติ แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ
+ตั้งค่าที่ config.py (CLICK_AT_MS, MOUSE_JUMP, RECORD, RANDOM_GAP_MS, ...)  บันทึกภาพ loot (ทึบ + สีปกติ) ลง output/loot ทุกรอบ
+(โหมดแยกแบบเดิม เช่น กดตามเวลาอย่างเดียว / collect อยู่ใน test_assist_and_react/)
 """
 
 import random
@@ -58,8 +55,18 @@ def wait_closed(screen, interval=0.2, confirm=3):
 
 # ---------------------------------------------------------------------------
 # โหมด assist (python main.py assist): คุณคุมเมาส์ บอทกด 2 อย่างคู่กัน
-#   1) กดตามเวลา ASSIST_CLICK_AT_MS (config.py) 1 ครั้งตรงที่เมาส์อยู่   2) กดตามสีช่องใต้เมาส์ (ทึบ->พร้อม หรือ GET!)
+#   1) กดตามเวลา CLICK_AT_MS (config.py) 1 ครั้งตรงที่เมาส์อยู่   2) กดตามสีช่องใต้เมาส์ (ทึบ->พร้อม หรือ GET!)
 # ---------------------------------------------------------------------------
+
+def _go(x, y, step=None):
+    """ย้ายเมาส์ไป (x, y): config.MOUSE_JUMP = True วาปทันที  False ลากแบบคน  คืน True ถ้า step สั่งหยุดกลางทาง"""
+    if config.MOUSE_JUMP:
+        real_move(x, y)
+        return False
+    stopped = move_to(x, y, on_step=step)
+    real_move(x, y)
+    return stopped
+
 
 def _summarize_clicks(screen, click_info, verdicts, cap0):
     """สรุปท้ายรอบ: จับภาพด้วยอะไร (wgc/mss + กี่เฟรมที่ตกไปใช้ mss) และแต่ละคลิกกดที่กี่ ms ด้วยวิธีไหน เก็บติดไหม"""
@@ -77,7 +84,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
     """1 รอบ: รอหัวข้อ Mission Reward แล้วทำ 2 อย่างพร้อมกัน (ไม่ระบุ names = เมาส์เป็นของคุณ บอทไม่ขยับ)
     names = ชื่อไอเท็มที่ต้องการ (assist carrot): บอท detect แล้ว"ลากเมาส์ไปครอบไอเท็ม"ให้ (ตามลำดับความสำคัญ)
             เก็บชิ้นหนึ่งว่างแล้วย้ายไปชิ้นถัดไป  การกดยังเป็น 2 อย่างเดิม (ตามเวลา + ตามสี)
-      1) กดตั้งเวลา: ที่ ASSIST_CLICK_AT_MS (ms จากหัวข้อ) กด 1 ครั้งตรงที่เมาส์อยู่  (None = ปิด)
+      1) กดตั้งเวลา: ที่ CLICK_AT_MS (ms จากหัวข้อ) กด 1 ครั้งตรงที่เมาส์อยู่  (None = ปิด)
       2) กดตามสี: เฝ้าช่องใต้เมาส์ กดเมื่อพื้นหลังช่องเปลี่ยน ทึบ->พร้อม หรือเห็นป้าย GET!  (ย้ายเมาส์ไปช่องอื่น = เฝ้าช่องใหม่)
     ไม่มีคลิกสำรอง/กดใหม่  ทำต่อจนกว่า Mission Reward จะหายไป  คืนจำนวนคลิก"""
     scale = get_scale(screen)
@@ -105,7 +112,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
     assist_round.verdicts = []
-    timed_ms = getattr(config, "ASSIST_CLICK_AT_MS", None)
+    timed_ms = config.CLICK_AT_MS
     cap0 = getattr(screen, "fallbacks", 0)
     click_info = []                                               # (คลิกที่, ms, วิธี, ช่อง)
     log.info("=" * 60)
@@ -164,9 +171,10 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
         hx, hy = _hover_point(item, box)
         if not dry_run:
             late = timed_due is not None and not timed_fired and time.perf_counter() > timed_due - 0.4
-            if not late:
-                move_to(hx, hy, on_step=_esc_step)
-            real_move(hx, hy)
+            if late:
+                real_move(hx, hy)                                     # เหลือเวลาน้อย: วาปเลย
+            else:
+                _go(hx, hy, _esc_step)
         log.info(f"  {ms():7.1f}ms  ลากเมาส์ไปครอบ {item_name(name)} ช่อง {slot_at((hx, hy)) + 1 if slot_at((hx, hy)) is not None else '-'}"
                  f"  screen=({hx}, {hy})  (คิวเหลือ {len(queue)})")
 
@@ -268,8 +276,8 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
 
 def run_assist(argv):
     dry_run = "--dry" in argv
-    record = bool(getattr(config, "ASSIST_RECORD", False))
-    timed_ms = getattr(config, "ASSIST_CLICK_AT_MS", None)
+    record = bool(config.RECORD)
+    timed_ms = config.CLICK_AT_MS
     names = None
     args = [a for a in argv if not a.startswith("--")]
     if args:                                                 # assist carrot / assist example_dungeon = บอทลากเมาส์ไปครอบไอเท็มให้
@@ -328,7 +336,7 @@ RANDOM_READY_WAIT = 1.5        # กล่องหายแล้ว รอไ�
 
 
 def random_round(screen, names=None, dry_run=False, record=False, round_no=1):
-    """1 รอบด่าน random loot  names = ชื่อไอเท็มที่ต้องการ  record = บันทึกวิดีโอ/trace/วิเคราะห์ (ASSIST_RECORD)  คืนจำนวนคลิก"""
+    """1 รอบด่าน random loot  names = ชื่อไอเท็มที่ต้องการ  record = บันทึกวิดีโอ/trace/วิเคราะห์ (RECORD)  คืนจำนวนคลิก"""
     hooks = {"rec": None}
     try:
         return _random_body(screen, names, dry_run, record, round_no, hooks)
@@ -455,10 +463,9 @@ def _random_body(screen, names, dry_run, record, round_no, hooks):
         nonlocal clicked
         x, y = _hover_point(it, box)
         if not dry_run:
-            if move_to(x, y, on_step=step):
+            if _go(x, y, step):
                 log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายระหว่างขยับ -> หยุด")
                 return False
-            real_move(x, y)
             time.sleep(ck.REAL_MOVE_DWELL)
             ck._send_mouse(down)
             time.sleep(random.uniform(*ck.CLICK_HOLD))
@@ -474,7 +481,7 @@ def _random_body(screen, names, dry_run, record, round_no, hooks):
             if esc_pressed():
                 raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
             if n:
-                time.sleep(config.COLLECT_GAP_MS / 1000)
+                time.sleep(config.RANDOM_GAP_MS / 1000)
             if not click_item(it, item_name(name)):
                 return False
         return True
@@ -482,7 +489,7 @@ def _random_body(screen, names, dry_run, record, round_no, hooks):
     # ---- 3) กดตามลำดับความสำคัญ แล้วตรวจซ้ำว่าช่องว่างหรือยัง ----
     if not sweep(targets):
         return clicked
-    for p in range(2, config.COLLECT_MAX_PASSES + 1):
+    for p in range(2, config.RANDOM_MAX_PASSES + 1):
         if dry_run:
             break
         end = time.perf_counter() + VERIFY_AFTER
@@ -533,7 +540,7 @@ def run_random(argv):
     rounds, total, errors = 0, 0, 0
     while True:
         try:
-            n = random_round(screen, names, dry_run, bool(getattr(config, "ASSIST_RECORD", False)), rounds + 1)
+            n = random_round(screen, names, dry_run, bool(config.RECORD), rounds + 1)
             rounds += 1
             total += n
             log.info(f"[random] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")

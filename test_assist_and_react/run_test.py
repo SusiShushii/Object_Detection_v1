@@ -1,7 +1,7 @@
 """
 run_test.py - ชุดทดสอบ/debug โหมด assist และ react แบบแยกส่วน (ไม่ใช่ production)
 
-production (python main.py assist) = กดตามเวลา ASSIST_CLICK_AT_MS + กดตามสี รวมกันโหมดเดียว ตั้งค่าที่ config.py ที่เดียว
+production (python main.py assist) = กดตามเวลา CLICK_AT_MS + กดตามสี รวมกันโหมดเดียว ตั้งค่าที่ config.py ที่เดียว
 โฟลเดอร์นี้เก็บโหมดเดิมที่แยกกันไว้ เผื่อมาวัด/เทียบ/debug  ใช้ snapshot ของโค้ดเดิมใน legacy_collector.py (ไม่เปลี่ยนตาม production)
 
     python test_assist_and_react/run_test.py assist 3988                  กดตามเวลาอย่างเดียว (2 ครั้งห่าง RETRY_AFTER_MS, --once = ครั้งเดียว)
@@ -29,7 +29,8 @@ for _s in (sys.stdout, sys.stderr):
 import config  # noqa: E402
 
 # ค่าที่เฉพาะโหมดทดสอบ (ไม่อยู่ใน config.py ของ production)
-for _k, _v in (("REACT_BACKUP_MS", 20), ("REACT_RETRY_MS", 350)):
+for _k, _v in (("REACT_BACKUP_MS", 20), ("REACT_RETRY_MS", 350), ("COLLECT_GAP_MS", 60), ("COLLECT_MAX_PASSES", 2),
+               ("MOUSE_JUMP", False), ("RECORD", False)):
     if not hasattr(config, _k):
         setattr(config, _k, _v)
 

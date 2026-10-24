@@ -3,7 +3,7 @@ main.py - จุดเริ่มต้นเดียวของโปรแ�
 
     python main.py                       เมนู: เลือกเลขว่าจะทำอะไร
     python main.py run carrot            รันบอทเก็บของ (ชื่อไอเท็ม/โปรไฟล์ได้หลายชื่อ  --dry = ไม่คลิกจริง)
-    python main.py assist                คุณคุมเมาส์เอง บอทกดตามเวลา (ASSIST_CLICK_AT_MS) + ตามสีช่อง รวมโหมดเดียว (ตั้งที่ config.py)
+    python main.py assist                คุณคุมเมาส์เอง บอทกดตามเวลา (CLICK_AT_MS) + ตามสีช่อง รวมโหมดเดียว (ตั้งที่ config.py)
     python main.py assist carrot         แบบเดียวกัน แต่บอท detect แล้วลากเมาส์ไปครอบไอเท็มให้ (ชื่อไอเท็ม/โปรไฟล์ได้หลายชื่อ)
     python main.py random blue_seaweed   ด่าน random loot: รอกล่อง ? หาย แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ
     python main.py carrot                เหมือน run carrot (พิมพ์ชื่อไอเท็มตรงๆ ได้ เหมือนเดิม)
@@ -41,7 +41,7 @@ for _s in (sys.stdout, sys.stderr):
 COMMANDS = {
     "run": ("รันบอทเก็บของหน้า Mission Result", None,
             "ชื่อไอเท็ม/โปรไฟล์ เช่น  carrot  หรือ  water_dungeon  (เว้นว่าง = ทุกไอเท็ม)   เพิ่ม --dry = ไม่คลิกจริง"),
-    "assist": ("คุณคุมเมาส์เอง บอทกดให้ 2 อย่างคู่กัน: กดตามเวลา ASSIST_CLICK_AT_MS + กดตามสีช่อง (ทึบ→พร้อม/GET!) บันทึกวิดีโอตาม ASSIST_RECORD", None,
+    "assist": ("คุณคุมเมาส์เอง บอทกดให้ 2 อย่างคู่กัน: กดตามเวลา CLICK_AT_MS + กดตามสีช่อง (ทึบ→พร้อม/GET!) บันทึกวิดีโอตาม RECORD", None,
                "เว้นว่าง = คุณคุมเมาส์เอง   ใส่ชื่อไอเท็ม/โปรไฟล์ เช่น  carrot  หรือ  example_dungeon = บอทลากเมาส์ไปครอบไอเท็มให้ แล้วกดแบบเดิม   --dry   (เวลา/วิธีจับภาพ/บันทึกตั้งที่ config.py)"),
     "random": ("ด่าน random loot: รอกล่อง ? หายหมด + ของเป็นสีปกติ แล้วขยับเมาส์ไปกดเฉพาะไอเท็ม/โปรไฟล์ที่ระบุ", None,
                "ชื่อไอเท็มตามลำดับความสำคัญ เช่น  blue_seaweed carrot  หรือชื่อโปรไฟล์ เช่น  example_dungeon   --list = ดูรายชื่อที่มี   --dry = ไม่คลิกจริง"),
