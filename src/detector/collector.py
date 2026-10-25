@@ -58,6 +58,18 @@ def wait_closed(screen, interval=0.2, confirm=3):
 #   1) กดตามเวลา CLICK_AT_MS (config.py) 1 ครั้งตรงที่เมาส์อยู่   2) กดตามสีช่องใต้เมาส์ (ทึบ->พร้อม หรือ GET!)
 # ---------------------------------------------------------------------------
 
+def click_times():
+    """เวลากดตามเวลา (ms จากหัวข้อ) จาก config.CLICK_AT_MS: ตัวเลขเดียว หรือรายการ เช่น [3975, 3980]  None/[] = ปิด  คืน list เรียงน้อย->มาก"""
+    raw = config.CLICK_AT_MS
+    if raw is None:
+        return []
+    return sorted(float(x) for x in (raw if isinstance(raw, (list, tuple)) else [raw]))
+
+
+def _fmt_times(times):
+    return "+".join(f"{t:g}" for t in times)
+
+
 def _go(x, y, step=None):
     """ย้ายเมาส์ไป (x, y): config.MOUSE_JUMP = True วาปทันที  False ลากแบบคน  คืน True ถ้า step สั่งหยุดกลางทาง"""
     if config.MOUSE_JUMP:
@@ -112,11 +124,11 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
     t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000
     assist_round.verdicts = []
-    timed_ms = config.CLICK_AT_MS
+    timed_times = click_times()
     cap0 = getattr(screen, "fallbacks", 0)
     click_info = []                                               # (คลิกที่, ms, วิธี, ช่อง)
     log.info("=" * 60)
-    log.info("[assist] เห็น Mission Reward  " + (f"กดตั้งเวลาที่ {timed_ms:g}ms + " if timed_ms is not None else "")
+    log.info("[assist] เห็น Mission Reward  " + (f"กดตั้งเวลาที่ {_fmt_times(timed_times)}ms + " if timed_times else "")
              + "เฝ้าช่องใต้เมาส์: กดทันทีเมื่อ (ทึบ→พร้อม) หรือ (เห็น GET!)"
              + f"  จับภาพ={screen.backend}"
              + f"  กดค้าง {config.CLICK_HOLD_MS}ms  (" + (f"บอทลากเมาส์ไปครอบ {', '.join(priority)}" if names else "เมาส์คุณเอง ไม่ขยับให้") + ")"
@@ -153,8 +165,9 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
         log.info(f"  {t:7.1f}ms  กด {label} (คลิกที่ {n_click}) {reason}  screen=({x}, {y})")
 
     done, groups = 0, 0
-    timed_due = None if timed_ms is None else t0 + timed_ms / 1000
-    timed_fired = timed_due is None
+    timed_i = 0                                                   # ลำดับเวลากดตามเวลาที่ถึงคิวต่อไป
+    timed_due = t0 + timed_times[0] / 1000 if timed_times else None
+    timed_fired = not timed_times
 
     def _esc_step():
         if esc_pressed():
@@ -217,18 +230,30 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
                     goto_next()
                     continue
             if not timed_fired and now >= timed_due - TIMED_LEAD:       # ถึงเวลากดตั้งเวลา: เช็กหัวข้อสดแล้ว spin รอเวลาเป๊ะ
-                timed_fired = True
-                if now > timed_due + 0.05:
-                    log.info(f"  {ms():7.1f}ms  เลยเวลากดตั้งเวลา {timed_ms:g}ms ไปแล้ว -> ข้าม (ใช้ตามสีแทน)")
+                batch = [timed_times[timed_i]]                           # เวลาที่ห่างกันไม่เกิน 60 ms กดต่อเนื่องในรอบเดียว (ไม่ log คั่นกลาง)
+                while timed_i + len(batch) < len(timed_times) and timed_times[timed_i + len(batch)] - batch[0] <= 60:
+                    batch.append(timed_times[timed_i + len(batch)])
+                timed_i += len(batch)
+                timed_fired = timed_i >= len(timed_times)
+                if not timed_fired:
+                    timed_due = t0 + timed_times[timed_i] / 1000
+                first_due = t0 + batch[0] / 1000
+                if now > first_due + 0.05:
+                    log.info(f"  {ms():7.1f}ms  เลยเวลากดตั้งเวลา {_fmt_times(batch)}ms ไปแล้ว -> ข้าม (ใช้ตามสีแทน)")
                 elif _header_score(screen.grab(box), scale) < HEADER_MATCH:
                     log.info(f"  {ms():7.1f}ms  ไม่เห็นหัวข้อก่อนกดตั้งเวลา -> ไม่กด")
                 else:
-                    while time.perf_counter() < timed_due:
-                        time.sleep(0)
                     groups += 1
-                    tt, _ = send_click(groups)
-                    click_info.append((done, tt, "ตั้งเวลา", slot_at(ck.get_cursor())))
-                    log_click("ตั้งเวลา", tt, done, f"(ตั้งไว้ {timed_ms:g}ms)")
+                    fired = []
+                    for t_ms in batch:
+                        due = t0 + t_ms / 1000
+                        while time.perf_counter() < due:
+                            time.sleep(0)
+                        tt, _ = send_click(groups)
+                        fired.append((tt, t_ms, done, slot_at(ck.get_cursor())))
+                    for tt, t_ms, n_click, sl in fired:
+                        click_info.append((n_click, tt, f"ตั้งเวลา {t_ms:g}", sl))
+                        log_click("ตั้งเวลา", tt, n_click, f"(ตั้งไว้ {t_ms:g}ms)")
                     continue
             idx = slot_at(cur)
             if idx != cur_idx:                                           # ย้ายเมาส์ไปช่องอื่น: เริ่มเฝ้าช่องใหม่
@@ -277,7 +302,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
 def run_assist(argv):
     dry_run = "--dry" in argv
     record = bool(config.RECORD)
-    timed_ms = config.CLICK_AT_MS
+    timed_times = click_times()
     names = None
     args = [a for a in argv if not a.startswith("--")]
     if args:                                                 # assist carrot / assist example_dungeon = บอทลากเมาส์ไปครอบไอเท็มให้
@@ -297,7 +322,7 @@ def run_assist(argv):
     screen = make_screen()
     tuned = tune_realtime()
     log.info("#" * 60)
-    log.info(f"[assist] เริ่มทำงาน ({'บอทลากเมาส์ไปครอบ ' + ', '.join(names) + ' และ' if names else 'คุณคุมเมาส์ บอท'}กด{f'ที่ {timed_ms:g}ms และ' if timed_ms is not None else ''}ตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
+    log.info(f"[assist] เริ่มทำงาน ({'บอทลากเมาส์ไปครอบ ' + ', '.join(names) + ' และ' if names else 'คุณคุมเมาส์ บอท'}กด{f'ที่ {_fmt_times(timed_times)}ms และ' if timed_times else ''}ตามสีช่อง/GET!)  dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  "
              f"ไม่มีคลิกสำรอง  จับภาพ={screen.backend}  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
     rounds, total, errors = 0, 0, 0
     while True:

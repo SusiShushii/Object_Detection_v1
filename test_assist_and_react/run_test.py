@@ -28,6 +28,9 @@ for _s in (sys.stdout, sys.stderr):
 
 import config  # noqa: E402
 
+if isinstance(config.CLICK_AT_MS, (list, tuple)):          # โหมดเดิมใช้เวลาเดียว: เอาตัวแรกสุด
+    config.CLICK_AT_MS = min(config.CLICK_AT_MS) if config.CLICK_AT_MS else None
+
 # ค่าที่เฉพาะโหมดทดสอบ (ไม่อยู่ใน config.py ของ production)
 for _k, _v in (("REACT_BACKUP_MS", 20), ("REACT_RETRY_MS", 350), ("COLLECT_GAP_MS", 60), ("COLLECT_MAX_PASSES", 2),
                ("MOUSE_JUMP", False), ("RECORD", False)):

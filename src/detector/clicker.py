@@ -137,7 +137,7 @@ LEFT_PENALTY = 2.5
 # ค่าหลักมาจาก config.py (แก้ที่นั่น)
 MAX_CLICKS_PER_ITEM = config.MAX_CLICKS_PER_ITEM   # กดช่องเดียวได้สูงสุดกี่ครั้ง ครบแล้วถือว่าเก็บแล้ว
 RETRY_AFTER = config.RETRY_AFTER_MS / 1000         # กดแล้วไม่ทึบแว้บนานเท่านี้ (วินาที) = คลิกไม่เข้า -> กดซ้ำ
-CLICK_AT_MS = config.CLICK_AT_MS                   # กดช่องแรกที่เวลานี้หลังหัวข้อขึ้น (None = กดตามสี)
+CLICK_AT_MS = (min(config.CLICK_AT_MS) if isinstance(config.CLICK_AT_MS, (list, tuple)) and config.CLICK_AT_MS else None if isinstance(config.CLICK_AT_MS, (list, tuple)) else config.CLICK_AT_MS)                  # กดช่องแรกที่เวลานี้หลังหัวข้อขึ้น (None = กดตามสี)
 TIMED_LEAD = 0.012                                 # เริ่มเตรียมกด (เช็กหัวข้อ/หน้าจอ) ก่อนถึงเวลากี่วินาที แล้ว spin รอให้ตรงเวลา
 RETRY_JITTER = (0.8, 1.4)      # สุ่มคูณ RETRY_AFTER ทุกครั้ง (กดซ้ำห่าง ~0.5-0.85 วิ ไม่เป็นจังหวะเป๊ะแบบมาโคร)
 CLICK_GAP = 0.12               # เว้นระยะขั้นต่ำระหว่างคลิก (วินาที) ให้เห็นทึบแว้บของคลิกก่อน (จริง ~65ms)
