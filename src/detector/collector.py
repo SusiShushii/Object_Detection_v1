@@ -180,7 +180,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
             tgt["item"] = None
             return
         name, item = queue.pop(0)
-        tgt.update(item=item, clicked=False, t=time.perf_counter(), chk=0.0)
+        tgt.update(item=item, clicked=False, t=time.perf_counter(), chk=0.0, gone_n=0)
         hx, hy = _hover_point(item, box)
         if not dry_run:
             late = timed_due is not None and not timed_fired and time.perf_counter() > timed_due - 0.4
@@ -226,7 +226,10 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
             if tgt["item"] is not None and tgt["clicked"] and now - tgt["chk"] >= 0.05:
                 tgt["chk"] = now                                       # เก็บชิ้นนี้แล้ว (ช่องว่าง/นานเกิน) -> ไปชิ้นถัดไป
                 it = tgt["item"]
-                if _is_empty_slot(img, it[0], it[1], it[2], it[3], scale) or now - tgt["t"] > 1.5:
+                gone = (_get_score(img, ("x", it), scale) < GET_MATCH
+                        and _is_empty_slot(img, it[0], it[1], it[2], it[3], scale))
+                tgt["gone_n"] = tgt.get("gone_n", 0) + 1 if gone else 0   # ต้องว่างติดกัน 2 ครั้ง (กัน GET!/แอนิเมชันทำให้เข้าใจผิดว่าหาย)
+                if tgt["gone_n"] >= 2 or now - tgt["t"] > 4.0:
                     goto_next()
                     continue
             if not timed_fired and now >= timed_due - TIMED_LEAD:       # ถึงเวลากดตั้งเวลา: เช็กหัวข้อสดแล้ว spin รอเวลาเป๊ะ
@@ -280,7 +283,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
             reason = None
             if _get_score(img, ("x", item), scale) >= GET_MATCH:
                 reason = "เห็นป้าย GET!"
-            elif was_dim and not _is_empty_slot(img, item[0], item[1], item[2], item[3], scale):
+            elif (was_dim or tgt["item"] is not None) and not _is_empty_slot(img, item[0], item[1], item[2], item[3], scale):
                 reason = "ทึบ→พร้อม"
             if reason is None:
                 continue
