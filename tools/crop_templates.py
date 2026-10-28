@@ -4,6 +4,7 @@ crop_templates.py - ครอปรูปไอเท็มจากภาพใ
     python main.py crop                  -> อ่านภาพจาก loot/ ใส่ผลลัพธ์ที่ crops/
     python main.py crop loot_other       -> อ่านจากโฟลเดอร์อื่น
     python main.py crop --min 0.8        -> เกณฑ์ว่า "เป็นไอเท็มเดียวกัน" (ค่าเริ่มต้น 0.75)
+    python main.py crop --all            -> รวมภาพตอนสีปกติ (_2_normal) ด้วย (ค่าเริ่มต้น: ใช้เฉพาะภาพตอนทึบ _1_dim ให้รูปเป็นสีทึบแบบเดียวกันหมด)
 
 ทำอะไร:
   - ครอปทุกช่องที่มีไอเท็มในภาพ loot/ (รู้ความละเอียดจากขนาดภาพ จึงใช้ได้กับภาพจากจอทุกขนาด
@@ -96,10 +97,13 @@ def main():
         loot_dir = args[0] if args else paths.LOOT
 
     files = glob.glob(os.path.join(loot_dir, "*.png"))
+    if "--all" not in sys.argv and any("_1_dim" in f for f in files):
+        files = [f for f in files if "_1_dim" in f]               # เฉพาะภาพตอนทึบ: รูปทุกใบเป็นสีทึบเหมือนกัน (ตรงกับตอนที่บอท detect)
+        print("ใช้เฉพาะภาพตอนทึบ (_1_dim)  ถ้าต้องการรวมภาพตอนสีปกติด้วยใส่ --all")
     if not files:
         print(f"ไม่พบภาพใน {loot_dir}")
         return
-    # ภาพตอนสีปกติก่อน (ละเอียดกว่าตอนทึบ) แล้วค่อยตอนทึบ ใหม่ก่อนเก่า
+    # ภาพตอนสีปกติก่อน (ถ้าใช้ --all) แล้วค่อยตอนทึบ ใหม่ก่อนเก่า
     files.sort(key=lambda f: ("_2_normal" not in f, -os.path.getmtime(f)))
 
     box = cv2.imread(os.path.join(paths.MARKERS, "loot_box.png"))

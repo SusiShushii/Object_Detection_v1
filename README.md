@@ -145,6 +145,7 @@ python main.py random blue_seaweed --dry
 python main.py crop                    # อ่าน output/loot -> ผลที่ output/crops (new_001.png ... + _sheet.png)
 python main.py crop <โฟลเดอร์อื่น>      # อ่านจากโฟลเดอร์อื่น
 python main.py crop --min 0.8          # เกณฑ์ "เป็นไอเท็มเดียวกัน" (ค่าเริ่มต้น 0.75)
+python main.py crop --all              # รวมภาพตอนสีปกติ (_2_normal) ด้วย (ค่าเริ่มต้นใช้เฉพาะภาพตอนทึบ _1_dim ให้รูปสีทึบเหมือนกันหมด และไม่โดน tooltip/ป้าย GET! ที่ขึ้นตอนเมาส์ hover บังบ่อยเท่าภาพสีปกติ)
 ```
 
 ข้ามช่องว่าง / กล่อง "?" / ป้าย GET! / ไอเท็มที่มีใน `assets/templates/` แล้ว / รูปซ้ำกันเอง
