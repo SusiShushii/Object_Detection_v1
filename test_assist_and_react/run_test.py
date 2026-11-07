@@ -10,30 +10,17 @@ production (python main.py assist) = กดตามเวลา CLICK_AT_MS + �
     python test_assist_and_react/run_test.py assist 3979 --react --ab     สลับสุ่มรอบละวิธี แล้วสรุปว่าอันไหนเก็บติด/เร็วกว่า
     python test_assist_and_react/run_test.py assist --first 3975,3979,3985   ทดสอบเวลาคลิกแรก  (--second / --after ดูใน legacy_collector.py)
     python test_assist_and_react/run_test.py collect                      เก็บทุกช่องตามเวลา CLICK_AT_MS ไม่ detect ไอเท็ม
+ตั้งค่าทดสอบอยู่ที่ test_config.py (ทับ config.py)  .bat แยกโฟลเดอร์: ms_only / react_only / ab / assist_and_react
 ตัวเลือกร่วม: --record (วิดีโอ+วิเคราะห์)  --dry (ไม่คลิกจริง)  --capture wgc|mss (หรือ --wgc / --mss)  หยุด: F12 ค้าง / Ctrl+C
 """
-import os
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-for _p in (os.path.join(ROOT, "src"), ROOT, HERE):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-for _s in (sys.stdout, sys.stderr):
-    try:
-        _s.reconfigure(encoding="utf-8", errors="replace")
-    except (AttributeError, OSError):
-        pass
+from _setup import setup
 
-import config  # noqa: E402
-
+config = setup()                                           # path + ค่าจาก test_config.py ทับ config.py (ก่อน import detector)
 if isinstance(config.CLICK_AT_MS, (list, tuple)):          # โหมดเดิมใช้เวลาเดียว: เอาตัวแรกสุด
     config.CLICK_AT_MS = min(config.CLICK_AT_MS) if config.CLICK_AT_MS else None
-
-# ค่าที่เฉพาะโหมดทดสอบ (ไม่อยู่ใน config.py ของ production)
-for _k, _v in (("REACT_BACKUP_MS", 20), ("REACT_RETRY_MS", 350), ("COLLECT_GAP_MS", 60), ("COLLECT_MAX_PASSES", 2),
-               ("MOUSE_JUMP", False), ("RECORD", False)):
+for _k, _v in (("REACT_BACKUP_MS", 20), ("REACT_RETRY_MS", 350), ("COLLECT_GAP_MS", 60), ("COLLECT_MAX_PASSES", 2)):
     if not hasattr(config, _k):
         setattr(config, _k, _v)
 

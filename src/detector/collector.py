@@ -223,8 +223,8 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
                              + ", ".join(f"{item_name(n)}@({it[0]},{it[1]})" for n, it in found))
                     goto_next()
                     continue
-            if tgt["item"] is not None and tgt["clicked"] and now - tgt["chk"] >= 0.05:
-                tgt["chk"] = now                                       # เก็บชิ้นนี้แล้ว (ช่องว่าง/นานเกิน) -> ไปชิ้นถัดไป
+            if tgt["item"] is not None and now - tgt["chk"] >= 0.05:
+                tgt["chk"] = now                                       # ชิ้นนี้ว่างแล้ว (เก็บแล้ว หรือคนอื่นเก็บไปก่อนที่เมาส์จะถึง) / นานเกิน -> ไปชิ้นถัดไป
                 it = tgt["item"]
                 gone = (_get_score(img, ("x", it), scale) < GET_MATCH
                         and _is_empty_slot(img, it[0], it[1], it[2], it[3], scale))

@@ -41,9 +41,12 @@ def _patch_v(vch, x, y, w, h):
 
 
 class RoundRecorder:
+    base_dir = None
+
     def __init__(self, scale, box, rects, t0, round_no=1):
         self.scale, self.box, self.rects, self.t0 = scale, box, rects, t0
-        self.dir = os.path.join(paths.OUTPUT, "assist_out", f"{time.strftime('%Y%m%d_%H%M%S')}_round{round_no}")
+        base = RoundRecorder.base_dir or os.path.join(paths.OUTPUT, "assist_out")      # base_dir ตั้งโดยชุดทดสอบ (test_assist_and_react) ให้แยกจาก production
+        self.dir = os.path.join(base, f"{time.strftime('%Y%m%d_%H%M%S')}_round{round_no}")
         os.makedirs(self.dir, exist_ok=True)
         self.frame_no = 0
         self.last = None                       # (ms, img) เฟรมล่าสุด (ไว้เซฟภาพตอนคลิก)
