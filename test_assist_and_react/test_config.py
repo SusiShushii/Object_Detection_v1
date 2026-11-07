@@ -21,7 +21,7 @@ CLICK_HOLD_MS = 1
 RECORD = True
 
 # True = วาปเมาส์ทันที  False = ลากแบบคน
-MOUSE_JUMP = False
+MOUSE_JUMP = True
 
 # ---- เฉพาะโหมดเดิม (react_only / ab / assist_and_react) ----
 REACT_BACKUP_MS = 20        # กดซ้ำสำรองหลังกดตามสีกี่ ms

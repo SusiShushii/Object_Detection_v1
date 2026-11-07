@@ -1,14 +1,16 @@
 """
-collector.py - โหมด assist และ random (python main.py assist / random)
+collector.py - โหมด assist (python main.py assist)
 
 assist : คุณคุมเมาส์ (หรือใส่ชื่อไอเท็มให้บอทขยับเมาส์ให้) บอทกด 2 อย่างคู่กัน: ตามเวลา CLICK_AT_MS + ตามสีช่อง (ทึบ->พร้อม / GET!)
-random : ด่าน random loot รอกล่อง ? หายหมด + ของเป็นสีปกติ แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ
-ตั้งค่าที่ config.py (CLICK_AT_MS, MOUSE_JUMP, RECORD, RANDOM_GAP_MS, ...)  บันทึกภาพ loot (ทึบ + สีปกติ) ลง output/loot ทุกรอบ
+ตั้งค่าที่ config.py (CLICK_AT_MS, MOUSE_JUMP, RECORD, ...)  บันทึกภาพ loot (ทึบ + สีปกติ) ลง output/loot ทุกรอบ
 (โหมดแยกแบบเดิม เช่น กดตามเวลาอย่างเดียว / collect อยู่ใน test_assist_and_react/)
 """
 
 import random
+
+import cv2
 import time
+import threading
 import traceback
 
 import config
@@ -17,7 +19,7 @@ from . import clicker as ck
 from .clicker import (BG_READY_V, GET_MATCH, LOCATE_EVERY, _get_score, _slot_bg_v, locate_header, GRID_ORIGIN, GRID_PITCH, GRID_SIZE, HEADER_MATCH, SLOT_WH, ClickAborted, _header_score,
                       _hover_point, _is_empty_slot, _loot_log, _loot_state, esc_pressed, move_to, real_move,
                       tune_realtime)
-from .detection import get_scale, item_name, log
+from .detection import COLOUR_CHECK, _color_top, get_scale, item_name, load_template, log, same_colour
 from .wgc import make_screen
 
 TIMED_LEAD = ck.TIMED_LEAD
@@ -31,6 +33,44 @@ def slot_rects(scale):
     (ox, oy), (px, py), (nc, nr), (sw, sh) = GRID_ORIGIN, GRID_PITCH, GRID_SIZE, SLOT_WH
     return [(int(round(5 + (ox + px * c) * scale)), int(round(5 + (oy + py * r) * scale)),
              int(sw * scale), int(sh * scale), 0) for r in range(nr) for c in range(nc)]
+
+
+SLOT_SEARCH_MARGIN = 8     # ค้นหาไอเท็มรอบช่อง ± เท่านี้ px (ที่จอ 2K) เร็วกว่าเทียบทั้งภาพหลายเท่า ผลเท่ากัน
+
+
+def _detect_slots(img, names, scale, rects, threshold=0.75):
+    """เหมือน ck._detect_all (คืน [(template, (x, y, w, h, score))]) แต่เทียบ template เฉพาะรอบ 21 ช่อง ไม่เทียบทั้งภาพ
+    ~10-15 เท่าเร็วกว่า (ต่อ template ~0.5 ms แทน ~6 ms)  ใช้ตอนต้องตรวจถี่ๆ ทุกเฟรม"""
+    H, W = img.shape[:2]
+    m = max(1, int(round(SLOT_SEARCH_MARGIN * scale)))
+    targets = []
+    for name in names:
+        tpl_full = load_template(name, scale)[0]
+        th, tw = tpl_full.shape[:2]
+        top = _color_top(name, scale)
+        topt = top.shape[0]
+        for (sx, sy, sw, sh, _) in rects:
+            x1, y1 = max(0, sx - m), max(0, sy - m)
+            x2, y2 = min(W, sx + sw + m), min(H, sy + max(sh, th) + m)
+            win = img[y1:y2, x1:x2]
+            if win.shape[0] < topt or win.shape[1] < tw:
+                continue
+            res = cv2.matchTemplate(win, top, cv2.TM_CCOEFF_NORMED)
+            res = res[:max(1, H - th + 1 - y1)]                      # กรอบเต็มต้องไม่ล้นภาพ (เหมือน match_map)
+            _, best, _, loc = cv2.minMaxLoc(res)
+            if not (best >= threshold):
+                continue
+            x, y = x1 + loc[0], y1 + loc[1]
+            if COLOUR_CHECK and not same_colour(img[y:y + th, x:x + tw], tpl_full):
+                continue
+            item = (int(x), int(y), tw, th, float(best))
+            overlap = next((t for t in targets if abs(t[1][0] - item[0]) <= item[2] // 2
+                            and abs(t[1][1] - item[1]) <= item[3] // 2), None)
+            if overlap is None:
+                targets.append((name, item))
+            elif item[4] > overlap[1][4]:
+                targets[targets.index(overlap)] = (name, item)
+    return targets
 
 
 def _occupied(img, scale, rects):
@@ -97,7 +137,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
     names = ชื่อไอเท็มที่ต้องการ (assist carrot): บอท detect แล้ว"ลากเมาส์ไปครอบไอเท็ม"ให้ (ตามลำดับความสำคัญ)
             เก็บชิ้นหนึ่งว่างแล้วย้ายไปชิ้นถัดไป  การกดยังเป็น 2 อย่างเดิม (ตามเวลา + ตามสี)
       1) กดตั้งเวลา: ที่ CLICK_AT_MS (ms จากหัวข้อ) กด 1 ครั้งตรงที่เมาส์อยู่  (None = ปิด)
-      2) กดตามสี: เฝ้าช่องใต้เมาส์ กดเมื่อพื้นหลังช่องเปลี่ยน ทึบ->พร้อม หรือเห็นป้าย GET!  (ย้ายเมาส์ไปช่องอื่น = เฝ้าช่องใหม่)
+      2) กดตามสี: เฝ้าช่องใต้เมาส์ กดเมื่อเห็นป้าย GET! หรือช่องเป็นสีปกติ (เปลี่ยนจากทึบ/เมาส์มาถึงช่องที่สีปกติแล้ว) และยังไม่ว่าง  (ย้ายเมาส์ไปช่องอื่น = เฝ้าช่องใหม่)
     ไม่มีคลิกสำรอง/กดใหม่  ทำต่อจนกว่า Mission Reward จะหายไป  คืนจำนวนคลิก"""
     scale = get_scale(screen)
     box = screen.get_region("mission_reward")
@@ -106,7 +146,28 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
     tnames = ck._resolve_names(names) if names else None
     priority = list(dict.fromkeys(names)) if names else []
     rank = lambda t: (priority.index(item_name(t[0])) if item_name(t[0]) in priority else len(priority), t[1][1], t[1][0])
-    queue, tgt, pending, last_detect = [], {"item": None, "clicked": False, "t": 0.0, "chk": 0.0}, bool(tnames), 0.0
+    queue, tgt, pending = [], {"item": None, "clicked": False, "t": 0.0, "chk": 0.0}, bool(tnames)
+
+    det = {"frame": None, "found": None, "stop": False, "passes": 0, "pass_ms": 0.0, "frame_to_found_ms": 0.0}   # หาไอเท็มในเธรดแยก: ลูปหลัก (กดตามเวลา/ตามสี) ไม่ต้องรอ detect
+    def _detect_worker():
+        last = None
+        while not det["stop"]:
+            fr = det["frame"]                                    # (ภาพ, เวลาที่จับได้)
+            if fr is None or fr is last:
+                time.sleep(0.001)
+                continue
+            last = fr
+            t_a = time.perf_counter()
+            found = _detect_slots(fr[0], tnames, scale, rects)
+            t_b = time.perf_counter()
+            det["passes"] += 1
+            det["pass_ms"] = (t_b - t_a) * 1000
+            if found:
+                det["frame_to_found_ms"] = (t_b - fr[1]) * 1000
+                det["found"] = found
+                return
+    if pending:
+        threading.Thread(target=_detect_worker, daemon=True).start()
 
     last_locate = 0.0
     while True:                                                   # รอหัวข้อ (ทุกเฟรม) + บันทึกภาพ loot
@@ -213,14 +274,15 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
                 if miss >= ck.HEADER_LOST_FRAMES:
                     log.info(f"  {ms():7.1f}ms  Mission Reward หายไปแล้ว -> จบรอบ (กดไป {done} ครั้ง {groups} ชิ้น)")
                     return done
-            if pending and now - last_detect >= 0.05:                    # ยังไม่เจอไอเท็มเป้าหมาย: ลอง detect ถี่ๆ
-                last_detect = now
-                found = sorted(ck._detect_all(img, tnames, scale), key=rank)
+            if pending:                                                  # ยังไม่เจอไอเท็มเป้าหมาย: ส่งเฟรมล่าสุดให้เธรด detect (ตรวจต่อเนื่องทุกเฟรมที่ว่าง)
+                det["frame"] = (img.copy(), now)
+                found = sorted(det["found"], key=rank) if det["found"] else None
                 if found:
                     pending = False
                     queue.extend(found)
                     log.info(f"  {ms():7.1f}ms  เจอไอเท็มเป้าหมาย {len(found)} ตัว: "
-                             + ", ".join(f"{item_name(n)}@({it[0]},{it[1]})" for n, it in found))
+                             + ", ".join(f"{item_name(n)}@({it[0]},{it[1]})" for n, it in found)
+                             + f"   [detect: ตรวจ {det['passes']} รอบ  รอบละ ~{det['pass_ms']:.1f}ms  เฟรมที่เจอ→ได้ผล {det['frame_to_found_ms']:.1f}ms]")
                     goto_next()
                     continue
             if tgt["item"] is not None and now - tgt["chk"] >= 0.05:
@@ -283,8 +345,8 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
             reason = None
             if _get_score(img, ("x", item), scale) >= GET_MATCH:
                 reason = "เห็นป้าย GET!"
-            elif (was_dim or tgt["item"] is not None) and not _is_empty_slot(img, item[0], item[1], item[2], item[3], scale):
-                reason = "ทึบ→พร้อม"
+            elif not _is_empty_slot(img, item[0], item[1], item[2], item[3], scale):    # ช่องเป็นสีปกติและมีของ (เห็นเปลี่ยนจากทึบ หรือเมาส์เพิ่งมาถึงช่องที่เป็นสีปกติอยู่แล้ว)
+                reason = "ทึบ→พร้อม" if was_dim else "สีปกติ"
             if reason is None:
                 continue
             lat = (time.perf_counter() - ready_since) * 1000
@@ -295,6 +357,7 @@ def assist_round(screen, dry_run=False, record=False, round_no=1, names=None):
             armed, fired_at = False, tp1
             log_click(f"ชิ้นที่ {groups}", t1, n1, f"[{reason}] ช่อง {idx + 1} V={v:.0f} (ช่องพร้อมมาแล้ว {lat:.1f}ms)")
     finally:
+        det["stop"] = True
         if rec is not None:
             rec.finish(log)
             assist_round.verdicts = rec.verdicts
@@ -344,244 +407,6 @@ def run_assist(argv):
         except Exception:
             errors += 1
             log.info(f"[assist] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {config.ERROR_RETRY_DELAY:.0f} วินาที\n"
-                     + traceback.format_exc())
-            try:
-                time.sleep(config.ERROR_RETRY_DELAY)
-                screen.close()
-                screen = make_screen()
-            except KeyboardInterrupt:
-                break
-
-
-# ---------------------------------------------------------------------------
-# โหมด random loot (python main.py random blue_seaweed ...)
-# ช่องเป็นกล่อง "?" -> รอกล่องหายหมด + ของเป็นสีปกติ -> ขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ (ตามลำดับความสำคัญ)
-# ---------------------------------------------------------------------------
-RANDOM_BOX_GONE_FRAMES = 2     # ไม่เห็นกล่อง "?" ติดกันกี่เฟรมถึงถือว่ากล่องหายหมด
-RANDOM_NO_BOX_WAIT = 0.6       # ไอเท็มขึ้นแล้ว (~3 วินาทีหลังหัวข้อ) แต่ไม่เจอกล่อง "?" นานเท่านี้ (วินาที) = ไม่ใช่ด่าน random loot -> ข้ามรอบนี้
-RANDOM_NOTHING_WAIT = 10.0     # เห็นหัวข้อแล้วช่องยังว่างทั้งหมดนานเท่านี้ (วินาที) = เลิกรอบนี้
-RANDOM_READY_WAIT = 1.5        # กล่องหายแล้ว รอไอเท็มเป้าหมายเป็นสีปกติไม่เกินเท่านี้ (วินาที)
-
-
-def random_round(screen, names=None, dry_run=False, record=False, round_no=1):
-    """1 รอบด่าน random loot  names = ชื่อไอเท็มที่ต้องการ  record = บันทึกวิดีโอ/trace/วิเคราะห์ (RECORD)  คืนจำนวนคลิก"""
-    hooks = {"rec": None}
-    try:
-        return _random_body(screen, names, dry_run, record, round_no, hooks)
-    finally:
-        if hooks["rec"] is not None:
-            hooks["rec"].finish(log)
-
-
-def _random_body(screen, names, dry_run, record, round_no, hooks):
-    scale = get_scale(screen)
-    box = screen.get_region("mission_reward")
-    down, up = ck.MOUSE_FLAGS["left"]
-    priority = list(dict.fromkeys(names)) if names else None
-    tnames = ck._resolve_names(names)
-    if not tnames:
-        log.info("[random] ไม่มี template ที่ตรงกับชื่อที่ระบุ")
-        return 0
-    clicked = 0
-
-    last_locate = 0.0
-    while True:                                                   # รอหัวข้อ
-        if esc_pressed():
-            raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
-        img = screen.grab(box)
-        _loot_log(img, scale)
-        if _header_score(img, scale) >= HEADER_MATCH:
-            break
-        if time.perf_counter() - last_locate >= LOCATE_EVERY:
-            last_locate = time.perf_counter()
-            if locate_header(screen, scale):
-                box = screen.get_region("mission_reward")
-        time.sleep(0.002)
-    t0 = _loot_state["since"] if _loot_state["visible"] else time.perf_counter()
-    ms = lambda: (time.perf_counter() - t0) * 1000
-    from .recorder import RoundRecorder
-    rec = hooks["rec"] = RoundRecorder(scale, box, slot_rects(scale), t0, round_no) if record else None
-    log.info("=" * 60)
-    log.info(f"[random] เห็น Mission Reward  เป้าหมาย: {', '.join(priority) if priority else 'ทุกไอเท็ม'}"
-             f"  รอกล่อง ? หาย + ของสีปกติ{'  [dry_run]' if dry_run else ''}")
-
-    state = {"miss": 0, "last_hdr": 0.0}
-
-    def check_frame(frame):
-        if rec is not None:
-            rec.add(frame, ck.get_cursor())
-        _loot_log(frame, scale)
-        now = time.perf_counter()
-        if now - state["last_hdr"] >= HDR_EVERY:
-            state["last_hdr"] = now
-            state["miss"] = 0 if _header_score(frame, scale) >= HEADER_MATCH else state["miss"] + 1
-        return state["miss"] < ck.HEADER_LOST_FRAMES
-
-    step_n = [0]
-
-    def step():
-        step_n[0] += 1
-        if step_n[0] % ck.STEP_CHECK_EVERY:
-            return False
-        return not check_frame(screen.grab(box))
-
-    # ---- 1) รอกล่อง ? หายหมด ----
-    seen_box, gone, items_since = False, 0, None
-    rects = slot_rects(scale)
-    while True:
-        if esc_pressed():
-            raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
-        img = screen.grab(box)
-        if not check_frame(img):
-            log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนกล่องเปิด -> เลิกรอบนี้")
-            return clicked
-        has_box, _ = ck._is_random_loot(img, scale)
-        if has_box:
-            if not seen_box:
-                log.info(f"  {ms():7.0f}ms  เห็นกล่อง ? (random loot) รอให้กล่องเปิดหมด")
-            seen_box, gone = True, 0
-        elif seen_box:
-            gone += 1
-            if gone >= RANDOM_BOX_GONE_FRAMES:
-                break
-        else:
-            now = time.perf_counter()
-            if _occupied(img, scale, rects):                           # ไอเท็มขึ้นแล้วแต่ยังไม่เห็นกล่อง ?
-                items_since = items_since or now
-                if now - items_since > RANDOM_NO_BOX_WAIT:
-                    log.info(f"  {ms():7.0f}ms  ไอเท็มขึ้นแล้วแต่ไม่เจอกล่อง ? -> ไม่ใช่ด่าน random loot ข้ามรอบนี้ (ใช้ run แทน)")
-                    return clicked
-            elif ms() > RANDOM_NOTHING_WAIT * 1000:
-                log.info(f"  {ms():7.0f}ms  ช่องยังว่างอยู่นานเกินไป -> เลิกรอบนี้")
-                return clicked
-    log.info(f"  {ms():7.0f}ms  กล่อง ? หายหมดแล้ว")
-
-    # ---- 2) หาไอเท็มเป้าหมาย + รอให้เป็นสีปกติ ----
-    rank = lambda t: (priority.index(item_name(t[0])) if priority and item_name(t[0]) in priority else 0,
-                      t[1][1], t[1][0])
-    deadline = time.perf_counter() + RANDOM_READY_WAIT
-    targets = []
-    while True:
-        if esc_pressed():
-            raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
-        img = screen.grab(box)
-        if not check_frame(img):
-            log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายก่อนกด -> เลิกรอบนี้")
-            return clicked
-        found = sorted(ck._detect_all(img, tnames, scale), key=rank)
-        ready = [t for t in found if _slot_bg_v(img, t[1]) >= BG_READY_V]
-        if found and len(ready) == len(found):
-            targets = found
-            break
-        if time.perf_counter() >= deadline:
-            targets = ready
-            if not found:
-                log.info(f"  {ms():7.0f}ms  ไม่เจอไอเท็มเป้าหมายในรอบนี้ -> ไม่คลิก")
-            elif not ready:
-                log.info(f"  {ms():7.0f}ms  เจอ {len(found)} ตัวแต่ยังทึบ -> ไม่คลิก")
-            else:
-                log.info(f"  {ms():7.0f}ms  รอสีปกติไม่ครบ -> กดเฉพาะที่พร้อม {len(ready)}/{len(found)}")
-            break
-    if not targets:
-        return clicked
-    log.info(f"  {ms():7.0f}ms  เจอเป้าหมาย {len(targets)} ตัว: "
-             + ", ".join(f"{item_name(n)}@({it[0]},{it[1]})" for n, it in targets))
-
-    def click_item(it, label):
-        nonlocal clicked
-        x, y = _hover_point(it, box)
-        if not dry_run:
-            if _go(x, y, step):
-                log.info(f"  {ms():7.0f}ms  หัวข้อ Mission Reward หายระหว่างขยับ -> หยุด")
-                return False
-            time.sleep(ck.REAL_MOVE_DWELL)
-            ck._send_mouse(down)
-            time.sleep(random.uniform(*ck.CLICK_HOLD))
-            ck._send_mouse(up)
-        clicked += 1
-        if rec is not None:
-            rec.mark_click(clicked, ms(), clicked)
-        log.info(f"  {ms():7.0f}ms  กด {label}  screen=({x}, {y})")
-        return True
-
-    def sweep(items):
-        for n, (name, it) in enumerate(items):
-            if esc_pressed():
-                raise ClickAborted(f"กด {ck.STOP_KEY_NAME} -> หยุด")
-            if n:
-                time.sleep(config.RANDOM_GAP_MS / 1000)
-            if not click_item(it, item_name(name)):
-                return False
-        return True
-
-    # ---- 3) กดตามลำดับความสำคัญ แล้วตรวจซ้ำว่าช่องว่างหรือยัง ----
-    if not sweep(targets):
-        return clicked
-    for p in range(2, config.RANDOM_MAX_PASSES + 1):
-        if dry_run:
-            break
-        end = time.perf_counter() + VERIFY_AFTER
-        while time.perf_counter() < end:
-            if not check_frame(screen.grab(box)):
-                return clicked
-        frame = screen.grab(box)
-        left = [t for t in targets if not _is_empty_slot(frame, t[1][0], t[1][1], t[1][2], t[1][3], scale)]
-        if not left:
-            log.info(f"  {ms():7.0f}ms  ช่องเป้าหมายว่างครบ -> เก็บเสร็จ ({clicked} คลิก)")
-            return clicked
-        log.info(f"  {ms():7.0f}ms  ยังไม่ว่าง {len(left)} ช่อง -> กดรอบที่ {p}")
-        if not sweep(left):
-            return clicked
-    log.info(f"  {ms():7.0f}ms  จบรอบ ({clicked} คลิก)")
-    return clicked
-
-
-def run_random(argv):
-    dry_run = "--dry" in argv
-    from .profiles import list_profiles, resolve
-    args = [a for a in argv if not a.startswith("--")]               # random blue_seaweed carrot  หรือ  random example_dungeon
-    info = resolve(args)
-    if "--list" in argv:
-        print(f"รูปไอเท็มที่มี: {info['available']}")
-        print(f"โปรไฟล์ที่มี: {list_profiles() or '(ยังไม่มี)'}")
-        return
-    for e in info["errors"]:
-        print(f"ผิดพลาด: {e}")
-    if info["errors"]:
-        return
-    if info["missing"]:
-        print(f"ไม่พบรูปไอเท็ม {info['missing']} (ต้องมีไฟล์ชื่อนี้.png ใน assets/templates/ หรือโฟลเดอร์โปรไฟล์)")
-        print(f"ที่มี: {info['available']}   โปรไฟล์ที่มี: {list_profiles() or '(ยังไม่มี)'}")
-        if not info["names"]:
-            return
-        print("-> เก็บเฉพาะที่หารูปเจอต่อไป")
-    names = info["names"]
-    if not names:                                                   # ไม่ระบุอะไรเลย = ไม่ทำงาน (กันกดทุกไอเท็มโดยไม่ตั้งใจ)
-        print("ต้องระบุชื่อไอเท็มหรือโปรไฟล์ เช่น  python main.py random blue_seaweed  หรือ  python main.py random example_dungeon"
-              f"  (ดูรายชื่อ: python main.py random --list)  รูปที่มี: {info['available']}")
-        return
-    screen = make_screen()
-    tuned = tune_realtime()
-    log.info("#" * 60)
-    log.info(f"[random] เริ่มทำงาน (random loot: กล่อง ? หาย + ของสีปกติ -> ขยับเมาส์กดเฉพาะ {', '.join(names) if names else 'ทุกไอเท็ม'})  "
-             f"dry_run={dry_run}  กดค้าง {config.CLICK_HOLD_MS}ms  {tuned}  กด {ck.STOP_KEY_NAME} ค้าง/Ctrl+C เพื่อหยุด")
-    rounds, total, errors = 0, 0, 0
-    while True:
-        try:
-            n = random_round(screen, names, dry_run, bool(config.RECORD), rounds + 1)
-            rounds += 1
-            total += n
-            log.info(f"[random] จบรอบที่ {rounds}  คลิก {n}  (รวม {total})")
-            wait_closed(screen)
-        except ClickAborted as e:
-            log.info(f"[random] หยุดทำงาน ({e})  {rounds} รอบ  คลิกรวม {total}  error {errors} ครั้ง")
-            break
-        except KeyboardInterrupt:
-            log.info(f"[random] หยุดทำงาน (Ctrl+C)  {rounds} รอบ  คลิกรวม {total}  error {errors} ครั้ง")
-            break
-        except Exception:
-            errors += 1
-            log.info(f"[random] เกิด error ครั้งที่ {errors} -> ทำงานต่อใน {config.ERROR_RETRY_DELAY:.0f} วินาที\n"
                      + traceback.format_exc())
             try:
                 time.sleep(config.ERROR_RETRY_DELAY)

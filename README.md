@@ -31,7 +31,6 @@ python main.py <คำสั่ง> --help          # วิธีใช้ข�
 |---|---|
 | `run` | รันบอทเก็บของ (`python main.py carrot` = `run carrot` พิมพ์ชื่อตรงๆ ได้) |
 | `assist` | **คุณคุมเมาส์เอง** บอทกดให้ 2 อย่างคู่กัน: กดตามเวลา `CLICK_AT_MS` + กดตามสีช่อง (ทึบ→พร้อม / GET!) |
-| `random` | ด่าน random loot: รอกล่อง ? หายหมด แล้วขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ |
 | `prepare` | เตรียมรูปไอเท็มที่ครอปเอง ใส่ `data/inbox/` → ตรวจ + ปรับเป็น 62×65 → `assets/templates/` |
 | `crop` | ครอปรูปไอเท็มอัตโนมัติจากภาพที่บอทบันทึก (`output/loot/`) |
 | `test` | ทดสอบ detect ไอเท็มบนรูปภาพ (ไม่แตะเมาส์/จอ) |
@@ -94,15 +93,6 @@ python main.py assist example_dungeon       # ใช้โปรไฟล์ (as
 
 โหมดแยก (ตั้งเวลาอย่างเดียว / ตามสีอย่างเดียว / สลับสุ่มเทียบ `--ab` / ทดสอบเวลา / เก็บทุกช่อง `collect`) ย้ายไปไว้ที่ `test_assist_and_react/` สำหรับ debug ดู `test_assist_and_react/run_test.py`
 
-### โหมด `random` — ด่าน random loot
-
-```bash
-python main.py random blue_seaweed carrot     # ชื่อไอเท็มตามลำดับความสำคัญ (ไม่ใส่ = ทุกไอเท็มใน templates)
-python main.py random blue_seaweed --dry
-```
-รอกล่อง "?" หายหมด → รอไอเท็มเป้าหมายเป็นสีปกติ → **ขยับเมาส์ไปกดเฉพาะไอเท็มที่ระบุ** ตามลำดับ แล้วตรวจซ้ำว่าช่องว่าง ถ้าเห็นหัวข้อแล้ว 1 วินาทีไม่มีกล่อง "?" เลยจะข้ามรอบนั้น
-(ต้องมีรูปไอเท็มใน `assets/templates/` ก่อน)
-
 ### โปรไฟล์ (ลำดับความสำคัญต่อด่าน)
 
 สร้างโฟลเดอร์ `assets/profiles/ชื่อด่าน/` ใส่ไฟล์ `priority.txt` บรรทัดละ 1 ไอเท็ม เรียงจากสำคัญที่สุดลงมา
@@ -120,10 +110,9 @@ python main.py random blue_seaweed --dry
 | `CAPTURE_BACKEND` / `CAPTURE_WINDOW` | ทุกโหมด | วิธีจับภาพ `"wgc"` (ตามเกม) หรือ `"mss"` (จับจอ) / ชื่อ process เกม |
 | `CLICK_AT_MS` | assist, run | กดกี่ ms หลังเห็นหัวข้อ Mission Reward `None` = กดตามสีอย่างเดียว |
 | `CLICK_HOLD_MS` | ทุกโหมด | กดค้างกี่ ms ก่อนปล่อยปุ่ม (เกมนับตอนปล่อย ยิ่งสั้นยิ่งเร็ว) |
-| `MOUSE_JUMP` | assist ชื่อ, random | `True` = วาปเมาส์ไปไอเท็มทันที  `False` = ลากแบบคน |
+| `MOUSE_JUMP` | assist ชื่อ | `True` = วาปเมาส์ไปไอเท็มทันที  `False` = ลากแบบคน |
 | `REGION_OFFSET` / `LOCATE_SEARCH` | ทุกโหมด | ตำแหน่งกรอบหน้า Mission Reward / พื้นที่ค้นหาหัวข้อเพิ่ม |
-| `RECORD` | assist, random | บันทึกวิดีโอ+วิเคราะห์ทุกรอบ (`output/assist_out`) |
-| `RANDOM_GAP_MS` / `RANDOM_MAX_PASSES` | random | เว้นระหว่างไอเท็มกี่ ms / ตรวจซ้ำสูงสุดกี่รอบ |
+| `RECORD` | assist | บันทึกวิดีโอ+วิเคราะห์ทุกรอบ (`output/assist_out`) |
 | `RETRY_AFTER_MS` / `MAX_CLICKS_PER_ITEM` | run | กดแล้วไม่เข้าภายในกี่ ms ให้กดซ้ำ / กดช่องเดียวได้สูงสุดกี่ครั้ง |
 | `TARGETS` | run | ไอเท็มเริ่มต้นเมื่อรันโดยไม่ใส่ชื่อ (`None` = ทุกไอเท็ม) |
 | `STOP_KEY_NAME` / `ERROR_RETRY_DELAY` | ทุกโหมด | ปุ่มหยุด `"F1"`–`"F12"`, `"End"`, `"Pause"` / รอกี่วินาทีหลังเกิด error |
@@ -255,7 +244,7 @@ python main.py fps
 ```
 main.py            จุดเริ่มต้นเดียว (เมนู + คำสั่ง)
 config.py          ตั้งค่าหลัก
-install.bat  run.bat  run_assist.bat  run_random.bat  venv_cmd.bat
+install.bat  run.bat  run_assist.bat  run_assist_pick.bat  venv_cmd.bat
 src/detector/      โค้ดหลักของบอท (ไม่ต้องรันเอง)
     app.py           ลูปหลักของบอท (run)
     clicker.py       จังหวะกด/คลิก/ขยับเมาส์
